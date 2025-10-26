@@ -19,7 +19,6 @@ knitr::opts_chunk$set(
   warning = FALSE
 )
 options(repos = c(CRAN = "https://cloud.r-project.org"))
-set.seed(1)
 ```
 
 # Overview
@@ -103,6 +102,7 @@ data_test$sample_metadata <- data_test$sample_metadata[pos_test, , drop = FALSE]
 Here we fit BayesCOOP using `bb = TRUE` to enable Bayesian bootstrap–based uncertainty estimation.   This step may take a while because it involves multiple bootstrap iterations, which can be adjusted through the `bbiters` and `bbburn` parameters.  The output includes the mean squared prediction error (`mspe`), posterior correlation (`rho_postmed`), and runtime.
 
 ```{r run_BayesCOOP_bb_true}
+set.seed(123)
 fit_BayesCOOP_bb_true <- BayesCOOP::BayesCOOP(
   data_train = data_train,
   data_test = data_test,
@@ -134,6 +134,7 @@ fit_BayesCOOP_bb_true$time
 We also run BayesCOOP again with `bb = FALSE` to obtain posterior mode estimates via a faster MAP-style variant (without bootstrap-based uncertainty). All other settings remain unchanged.
 
 ```{r run_BayesCOOP_bb_false}
+set.seed(123)
 fit_BayesCOOP_bb_false <- BayesCOOP::BayesCOOP(
    data_train = data_train,
   data_test = data_test,
@@ -164,6 +165,7 @@ fit_BayesCOOP_bb_false$time
 Next, we construct three Cooperative Learning baselines using the multiview package: “Early” (ρ = 0), “Intermediate” (ρ = 0.5), and “Late” (ρ = 1). We apply identical preprocessing steps—including feature filtering and alignment—cross-validate the regularization parameter, fit the models, and record the MSPE and runtime.
 
 ```{r coop_baseline}
+set.seed(123)
 y_train <- BayesCOOP:::gen_datalist(data_train)$y
 y_test  <- BayesCOOP:::gen_datalist(data_test)$y
 xList_train <- BayesCOOP:::gen_datalist(data_train)$xList
@@ -245,12 +247,77 @@ perf_table
 
 Finally, we count the number of **selected (nonzero) features** for each method to compare their **sparsity** and **selection aggressiveness**.  
 
-```{r feature_selection}
+```{r feature_selection_bcoop}
+set.seed(123)
+fit_BayesCOOP_bb_true_fs <- BayesCOOP::BayesCOOP(
+  data_train = data_train,
+  data_test = data_train,
+  family = "gaussian",
+  ss = c(0.05, 1),
+  group = TRUE,
+  bb = TRUE,
+  alpha_dirich = 1,
+  bbiters = 1100,
+  bbburn = 100,
+  maxit = 100,
+  filter = TRUE,
+  abd_thresh = 0,
+  prev_thresh = 0.1,
+  Warning = TRUE,
+  verbose = TRUE,
+  control = list()
+)
 
-n_nz_BayesCOOP_bb_true  <- sum(fit_BayesCOOP_bb_true$beta_postmed!=0)
-n_nz_BayesCOOP_bb_false <- sum(fit_BayesCOOP_bb_false$beta_MAP!=0)
+fit_BayesCOOP_bb_false_fs <- BayesCOOP::BayesCOOP(
+  data_train = data_train,
+  data_test = data_train,
+  family = "gaussian",
+  ss = c(0.05, 1),
+  group = TRUE,
+  bb = FALSE,
+  alpha_dirich = 1,
+  bbiters = 1100,
+  bbburn = 100,
+  maxit = 100,
+  filter = TRUE,
+  abd_thresh = 0,
+  prev_thresh = 0.1,
+  Warning = TRUE,
+  verbose = TRUE,
+  control = list(rho = 0.5)
+)
 
-coop_sparse_df <- do.call(rbind, lapply(coop_results, function(res)
+n_nz_BayesCOOP_bb_true  <- sum(fit_BayesCOOP_bb_true_fs$beta_postmed!=0)
+n_nz_BayesCOOP_bb_false <- sum(fit_BayesCOOP_bb_false_fs$beta_MAP!=0)
+```
+
+```{r feature_selection_mv}
+set.seed(123)
+y_train <- BayesCOOP:::gen_datalist(data_train)$y
+xList_train <- BayesCOOP:::gen_datalist(data_train)$xList
+xList_train <- lapply(xList_train, function(foo)
+  as.matrix(BayesCOOP:::filter_features(foo, abd_thresh = 0, prev_thresh = 0.1)))
+
+cvfit_alpha <- function(xlist, y, rho, alpha = 1, folds = 5) {
+  cvfit <- multiview::cv.multiview(x_list = xlist, y = y, rho = rho, alpha = alpha, nfolds = folds)
+  list(lambda_min = cvfit$lambda.min)
+}
+
+rhos_to_try <- c("Early" = 0, "Intermediate" = 0.5, "Late" = 1)
+coop_results_fs <- lapply(names(rhos_to_try), function(label) {
+  rho_val <- rhos_to_try[[label]]
+  start_time <- Sys.time()
+  cvres <- cvfit_alpha(xList_train, y_train, rho = rho_val)
+  best_lambda <- cvres$lambda_min
+  fit_mv <- multiview::multiview(xList_train, y_train, lambda = best_lambda, rho = rho_val, alpha = 1)
+  runtime_min <- round(as.numeric(difftime(Sys.time(), start_time, units = "mins")), 3)
+
+  coefs_mv <- coef(fit_mv, s = best_lambda, rho = rho_val, alpha = 1)
+  n_nonzero_mv <- sum(coefs_mv!=0)-1 # Exclude the intercept
+
+  list(method = label, rho = rho_val, time_min = runtime_min, n_nonzero = n_nonzero_mv)
+})
+coop_sparse_df <- do.call(rbind, lapply(coop_results_fs, function(res)
   data.frame(method = paste0("Cooperative Learning (", res$method, ", rho=", res$rho, ")"),
              n_selected_feat = res$n_nonzero)))
 
