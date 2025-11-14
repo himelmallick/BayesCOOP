@@ -1,0 +1,35 @@
+citHeader("To cite BayesCOOP, please cite both the preprint and the R package:")
+
+# 1. Preprint citation (FULL AUTHOR LIST)
+bibentry(
+  bibtype     = "Article",
+  key         = "BayesCOOP-preprint",
+  title       = "Bayesian Cooperative Learning for Multimodal Integration",
+  author      = c(
+    person("Saptarshi", "Roy"),
+    person("Sreya", "Sarkar"),
+    person("Erina", "Paul"),
+    person("Piyali", "Basak"),
+    person("Nengjun", "Yi"),
+    person("Himel", "Mallick")
+  ),
+  journal     = "bioRxiv",
+  doi         = "10.1101/2025.10.23.684056v1",
+  url         = "https://www.biorxiv.org/content/10.1101/2025.10.23.684056v1",
+  year        = "2025"
+)
+
+# 2. R package citation (PACKAGE AUTHORS ONLY)
+bibentry(
+  bibtype     = "Manual",
+  key         = "BayesCOOP-package",
+  title       = "The BayesCOOP R package",
+  author      = c(
+    person("Saptarshi", "Roy"),
+    person("Sreya",    "Sarkar"),
+    person("Himel",    "Mallick")
+  ),
+  year        = "2025",
+  note        = "R package version 0.1.0",
+  url         = "https://github.com/himelmallick/BayesCOOP"
+)

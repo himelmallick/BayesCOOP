@@ -1,0 +1,35 @@
+Package: BayesCOOP
+Type: Package
+Title: Bayesian Cooperative Learning for Multimodal Integration
+Version: 0.1.0
+Authors@R: c(
+    person(
+      "Saptarshi", "Roy",
+      email = "roys8001@tamu.edu",
+      role = c("aut")
+    ),
+    person(
+      "Sreya", "Sarkar",
+      email = "sreya-sarkar@uiowa.edu",
+      role = c("aut")
+    ),
+    person(
+      "Himel", "Mallick",
+      email = "him4004@med.cornell.edu",
+      role = c("aut", "cre")
+    )
+  )
+Description: BayesCOOP implements Bayesian cooperative learning for multimodal 
+    data integration. The method combines jittered group spike-and-slab LASSO 
+    regularization with intermediate fusion to enable robust and scalable 
+    learning across multiple data modalities. For uncertainty quantification, 
+    BayesCOOP applies the Bayesian bootstrap to generate approximate posterior 
+    samples via maximum a posteriori (MAP) estimation on jittered and resampled 
+    multimodal datasets. The current version supports continuous outcomes, with 
+    additional outcome types planned for future releases.
+License: MIT + LICENSE
+Encoding: UTF-8
+Imports: caret, dplyr, glmnet, MCMCpack, rmutil, survival, truncnorm, utils
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+
