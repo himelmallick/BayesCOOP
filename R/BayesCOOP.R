@@ -251,6 +251,7 @@ BayesCOOP <- function(data_train, data_test, family = "gaussian",
         mspe <- mean((y_pred - y_test)^2)
 
         output$y_pred <- y_pred
+        output$y_valid <- y_test
         output$mspe <- mspe
         output$beta_MAP <- betahat_MAP
         output$rho_MAP <- rho_MAP
