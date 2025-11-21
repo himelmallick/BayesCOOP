@@ -211,6 +211,7 @@ BayesCOOP <- function(data_train, data_test, family = "gaussian",
         
         output$y_samples <- y_samples
         output$y_pred <- y_pred
+        output$y_valid <- y_test
         output$mspe <- mspe
         output$beta_samples <- beta_samples
         output$beta_postmed <- beta_postmed
