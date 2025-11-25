@@ -66,12 +66,16 @@ make_row  <- function(x_list, p_x, pair, rho) {
 }
 
 data.Augment.2views <- function(y, dataList, rho){
-    y_aug <- c(y, rep(0, length(y)))
     tdataList <- list()
     tdataList[[1]] <- rbind.data.frame(dataList[[1]], -sqrt(rho) * dataList[[1]])
     tdataList[[2]] <- rbind.data.frame(dataList[[2]], sqrt(rho) * dataList[[2]])
     x_aug <- do.call("cbind", tdataList)
-    return(list(y_aug = y_aug, x_aug = x_aug))
+    if(is.null(y)) {
+        return(list(x_aug = x_aug))
+    } else {
+        y_aug <- c(y, rep(0, length(y)))
+        return(list(y_aug = y_aug, x_aug = x_aug))
+    }
 }
 
 
@@ -88,15 +92,21 @@ data.Augment.mviews <- function(y, dataList, rho){
         colnames(rows[[i]]) <- colnames(x)
     }
     xt <- do.call(rbind, c(list(x), rows))
-    yt <- c(y, rep(0, length(pairs) * length(y)))
-    return(list(y_aug = yt, x_aug = xt))
+    
+    if(is.null(y)) {
+        return(list(x_aug = xt))
+    } else {
+        yt <- c(y, rep(0, length(pairs) * length(y)))
+        return(list(y_aug = yt, x_aug = xt))
+    }
+    
 }
 
 data.Augment <- function(y, dataList, rho){
     if(length(dataList) == 2) {
-        dataAug <- data.Augment.2views(y, dataList, rho)
+        dataAug <- data.Augment.2views(y = y, dataList = dataList, rho = rho)
     } else {
-        dataAug <- data.Augment.mviews(y, dataList, rho)
+        dataAug <- data.Augment.mviews(y = y, dataList = dataList, rho = rho)
     }
     return(dataAug)
 }

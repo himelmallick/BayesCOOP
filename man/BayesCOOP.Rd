@@ -6,7 +6,6 @@
 \usage{
 BayesCOOP(
   data_train,
-  data_test,
   family = "gaussian",
   ss = c(0.05, 1),
   group = TRUE,
@@ -25,9 +24,6 @@ BayesCOOP(
 }
 \arguments{
 \item{data_train}{a list of feature_table, sample_metadata and feature_metadata from training
-data (unstandardized). See \emph{IntegratedLearner} for more details.}
-
-\item{data_test}{a list of feature_table, sample_metadata and feature_metadata from testing
 data (unstandardized). See \emph{IntegratedLearner} for more details.}
 
 \item{family}{currently supports only Gaussian family. Default: "gaussian".}
@@ -60,27 +56,25 @@ Default: 0.1.}
 
 \item{verbose}{logical. If TRUE, print iteration counts and runtime. Default: TRUE.}
 
-\item{control}{a named list with element \code{rho}, giving one or more candidate rho values
+\item{control}{a named list with element \eqn{\rho}, giving one or more candidate rho values
 to try when \code{bb = FALSE}.}
 }
 \value{
 If \code{bb = TRUE}, a list with:
-\item{y_samples}{posterior predictive draws (approximate)}
-\item{y_pred}{posterior predictive median for each held-out sample}
-\item{mspe}{mean squared prediction error on test data}
 \item{beta_samples}{posterior draws of regression coefficients}
 \item{beta_postmed}{posterior median coefficients}
-\item{rho_samples}{posterior draws of consensus penalty \code{rho}}
-\item{rho_postmed}{posterior median of \code{rho}}
+\item{rho_samples}{posterior draws of consensus penalty \eqn{\rho}}
+\item{rho_postmed}{posterior median of \eqn{\rho}}
 \item{errVar_samples}{posterior draws of residual variance}
+\item{errVar_postmed}{posterior median of \eqn{\sigma^2}}
 \item{time}{runtime in minutes}
+\item{feature_names}{list of feature names in the training dataset}
 
 If \code{bb = FALSE}, a list with:
-\item{y_pred}{predicted response values on test data}
-\item{mspe}{mean squared prediction error on test data}
 \item{beta_MAP}{MAP estimate of regression coefficients}
-\item{rho_MAP}{selected \code{rho} (minimizing MSPE over \code{control$rho})}
+\item{rho_MAP}{selected \eqn{\rho} (minimizing MSPE over \code{control$rho})}
 \item{time}{runtime in minutes}
+\item{feature_names}{list of feature names in the training dataset}
 }
 \description{
 This function implements the BayesCOOP methodology for supervised multimodal

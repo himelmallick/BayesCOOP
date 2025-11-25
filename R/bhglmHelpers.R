@@ -10,13 +10,13 @@
 #' @keywords internal
 #' @name bhglmHelpers
 #'
-#' @importFrom dplyr filter lag
+#' @importFrom dplyr %>% filter lag
 #' @importFrom glmnet glmnet
 #' @importFrom MCMCpack rdirichlet
 #' @importFrom rmutil rlaplace
-#' @importFrom stats rnorm rgamma quantile median
+#' @importFrom stats coef deviance model.frame model.matrix na.pass optimize predict runif rnorm sd var
+#' @importFrom survival cluster is.Surv
 #' @importFrom truncnorm rtruncnorm
-#' @importFrom survival cluster
 NULL
 
 bhglm.Grouping <- function (all.var, group) {
