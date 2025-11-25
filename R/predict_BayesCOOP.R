@@ -68,9 +68,13 @@ predict_BayesCOOP <- function(object, newdata, family = "gaussian",
     #########################################################################
     ##################### Prediction using posterior samples ################
     #########################################################################
+    
+    idx <- unlist(keep_features) # flatten the list into a character vector
 
     if(bb) {
         message("Prediction using posterior samples...")
+        
+        beta_sub <- object$beta_samples[ , colnames(object$beta_samples) %in% idx, drop = FALSE]
         y_samples <- matrix(NA, length(object$errVar_samples), nrow(xList_test[[1]]))
 
         ## Augmented test data
@@ -78,7 +82,7 @@ predict_BayesCOOP <- function(object, newdata, family = "gaussian",
         x_aug_test <- as.matrix(dataAug_test$x_aug)
 
         y_aug_samples <- do.call("rbind", lapply(1:nrow(y_samples),
-                                function(tt) {drop(x_aug_test %*% object$beta_samples[tt, ]) + rnorm(nrow(x_aug_test), 0, sqrt(object$errVar_samples[tt]))}))
+                                function(tt) {drop(x_aug_test %*% beta_sub[tt, ]) + rnorm(nrow(x_aug_test), 0, sqrt(object$errVar_samples[tt]))}))
         y_samples <- y_aug_samples[, 1:nrow(xList_test[[1]])]
         y_pred <- apply(y_samples, 2, median)
         
@@ -89,11 +93,12 @@ predict_BayesCOOP <- function(object, newdata, family = "gaussian",
 
     } else {
         message("Prediction using MAP estimator...")
-
+      
+        beta_sub <- object$beta_MAP[idx]
         ## Augmented test data
         dataAug_test <- data.Augment(y = NULL, xList_test_std, object$rho_MAP)
         x_aug_test <- as.matrix(dataAug_test$x_aug)
-        y_aug_hat <- x_aug_test %*% object$beta_MAP
+        y_aug_hat <- x_aug_test %*% beta_sub
         y_pred <- y_aug_hat[1:nrow(xList_test[[1]])]
 
         output$y_pred <- y_pred
