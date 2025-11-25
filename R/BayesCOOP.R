@@ -181,9 +181,9 @@ BayesCOOP <- function(data_train, family = "gaussian",
 
         
         output$beta_samples <- beta_samples
-        colnames(output$beta_samples) <- feature_names
+        colnames(output$beta_samples) <- unlist(feature_names)
         output$beta_postmed <- beta_postmed
-        names(output$beta_postmed) <- feature_names
+        names(output$beta_postmed) <- unlist(feature_names)
         output$rho_samples <- rho_samples
         output$rho_postmed <- rho_postmed
         output$errVar_samples <- errVar_samples
@@ -212,7 +212,7 @@ BayesCOOP <- function(data_train, family = "gaussian",
         time <- as.numeric(round(difftime(stop.time, start.time, units="min"), 3), units = "mins")
 
         output$beta_MAP <- betahat_MAP
-        names(output$beta_MAP) <- feature_names
+        names(output$beta_MAP) <- unlist(feature_names)
         output$rho_MAP <- rho_MAP
         output$time <- time
         output$feature_names <- feature_names
