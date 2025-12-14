@@ -35,7 +35,6 @@ Here is a minimal call to `BayesCOOP()`:
 ```r
 fit <- BayesCOOP::BayesCOOP(
   data_train,           # list with feature_table, sample_metadata and feature_metadata (train)
-  data_test,            # same structure for held-out / validation data
   family       = "gaussian",   # currently only continuous outcomes are supported
   ss           = c(0.05, 1),   # spike-and-slab scales (s0, s1); controls sparsity
   group        = TRUE,         # whether to apply group-wise shrinkage by modality
@@ -44,10 +43,7 @@ fit <- BayesCOOP::BayesCOOP(
   bbiters      = 1100,         # total bootstrap iterations
   bbburn       = 100,          # burn-in iterations discarded from the bootstrap
   maxit        = 100,          # max EM iterations for the inner optimizer
-  filter       = TRUE,         # filter low-abundance / low-prevalence features first
-  abd_thresh   = 0,            # abundance threshold for filtering
-  prev_thresh  = 0.1,          # prevalence threshold for filtering
-  Warning      = TRUE,         # print convergence warnings
+  warning      = TRUE,         # print convergence warnings
   verbose      = TRUE,         # print iteration progress and timing
   control      = list()        # (used if bb = FALSE; see below)
 )
@@ -57,29 +53,27 @@ fit <- BayesCOOP::BayesCOOP(
 
 When `bb = TRUE` (the default Bayesian mode), the returned object includes:
 
-- `mspe`: mean squared prediction error on the test set  
-- `y_pred`: predicted response values  
-- `y_samples`: posterior predictive draws  
+- `beta_samples`: posterior predictive draws  
 - `beta_postmed`: posterior median of the coefficients  
-- `rho_postmed`: posterior median of the agreement parameter across views  
+- `rho_samples`: posterior draws of the agreement parameter across views
+- `rho_postmed`: posterior median of the agreement parameter across views
+- `errVar_samples`: posterior draws of the error variance
+- `errVar_postmed`: posterior median of the error variance
 - `time`: runtime in minutes
+- `feature_names`: list of feature names in the dataset
 
 When `bb = FALSE`, BayesCOOP runs fast MAP estimation instead of the Bayesian bootstrap. In that case you must pass `control = list(rho = c(...))`, e.g.:
 
 ```r
 fit_map <- BayesCOOP::BayesCOOP(
-  data_train,
-  data_test,
-  bb      = FALSE,
+  data_train, ss = c(0.05, 1), group = TRUE,
+  bb = FALSE, maxit = 100,
   control = list(rho = c(0, 0.5, 1))  # candidate cross-view agreement values
 )
 
-fit_map$mspe     # MSPE for the best fusion level
 fit_map$rho_MAP  # selected agreement parameter
 fit_map$beta_MAP # MAP coefficients
 ```
-
-In both modes, `mspe` is the main out-of-sample accuracy metric you can report.
 
 ---
 
