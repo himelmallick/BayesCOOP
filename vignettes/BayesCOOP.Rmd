@@ -1,0 +1,297 @@
+---
+title: "BayesCOOP: End-to-End Tutorial"
+author: "Saptarshi Roy, Sreya Sarkar, Himel Mallick"
+output:
+  html_document:
+    theme: readable
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_sections: false
+date: "2025-12-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  message = FALSE,
+  warning = FALSE
+)
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+```
+
+# Overview
+
+In this tutorial, we work through a complete multimodal regression workflow using **BayesCOOP**.
+
+**BayesCOOP** is a scalable Bayesian framework for supervised multimodal integration with continuous outcomes. It uses group spike-and-slab double exponential shrinkage prior for joint feature/view selection and can optionally run a Bayesian bootstrap for uncertainty. For further details, see our [preprint](https://www.biorxiv.org/content/10.1101/2025.10.23.684056v1).
+
+In this tutorial we: (1) load and preprocess a longitudinal pregnancy multi-omics dataset (immune + proteomics), (2) fit BayesCOOP with and without Bayesian bootstrap, (3) fit Cooperative Learning baselines (ρ = 0, 0.5, 1), (4) compare prediction error/time, and (5) compare feature selection sparsity.
+
+------------------------------------------------------------------------
+
+# 1. Installation and Package Setup
+
+We install **BayesCOOP** from GitHub if it is not already available in our R library. We recommend doing this from a fresh R session so we are not accidentally masking a function from an older development build.
+
+```{r install_BayesCOOP}
+if (!requireNamespace("devtools", quietly = TRUE)) install.packages("devtools")
+devtools::install_github("himelmallick/BayesCOOP")
+library(BayesCOOP)
+```
+
+Now we load the packages we are going to use in the rest of the tutorial: `BayesCOOP` (main method), `dplyr` (data pre-processing), and `multiview` (Cooperative Learning).
+
+```{r packages}
+if (!requireNamespace("dplyr", quietly = TRUE)) install.packages("dplyr")
+if (!requireNamespace("multiview", quietly = TRUE)) install.packages("multiview")
+
+library(dplyr)
+library(multiview)
+```
+
+------------------------------------------------------------------------
+
+# 2. Load the Pregnancy Dataset
+
+We load the pregnancy dataset from the [IntegratedLearner GitHub repository](https://github.com/himelmallick/IntegratedLearner).  
+The dataset is divided into **training** and **validation** sets, each provided as a list containing three components:
+
+- **`feature_table`** – a matrix of features (e.g., microbial taxa, metabolites) with samples as columns and features as rows.  
+- **`feature_metadata`** – annotations describing each feature, such as modality or biological type.  
+- **`sample_metadata`** – accompanying sample-level information, including phenotype, covariates, and grouping variables.
+
+```{r load_data}
+data_train <- get(load(url(
+  "https://raw.githubusercontent.com/himelmallick/IntegratedLearner/master/data/StelzerDOS.RData"
+)))
+data_test <- get(load(url(
+  "https://raw.githubusercontent.com/himelmallick/IntegratedLearner/master/data/StelzerDOS_valid.RData"
+)))
+```
+
+------------------------------------------------------------------------
+
+# 3. Preprocessing
+
+We remove metabolomics features since it’s not present in the validation set. Then we realign the feature tables to the filtered metadata so that only valid rows and columns remain. Finally, we consider baseline samples only—training samples labeled with “A” and test samples labeled with “G1”—ensuring that both features and sample metadata stay perfectly synchronized across datasets.
+
+```{r preprocess_data}
+data_train$feature_metadata <- data_train$feature_metadata %>%
+  filter(featureType != "Metabolomics")
+
+data_train$feature_table <- data_train$feature_table[
+  rownames(data_train$feature_metadata), , drop = FALSE
+]
+
+pos_train <- grep("A", colnames(data_train$feature_table), ignore.case = TRUE)
+data_train$feature_table  <- data_train$feature_table[, pos_train, drop = FALSE]
+data_train$sample_metadata <- data_train$sample_metadata[pos_train, , drop = FALSE]
+
+pos_test <- grep("G1", colnames(data_test$feature_table))
+data_test$feature_table   <- data_test$feature_table[, pos_test, drop = FALSE]
+data_test$sample_metadata <- data_test$sample_metadata[pos_test, , drop = FALSE]
+
+xList_train <- BayesCOOP:::gen_datalist(data_train)$xList
+y_train <- BayesCOOP:::gen_datalist(data_train)$y
+xList_test <- BayesCOOP:::gen_datalist(data_test)$xList
+y_test <- BayesCOOP:::gen_datalist(data_test)$y
+abd_thresh <- 0; prev_thresh <- 0.1
+xList_train <- lapply(xList_train, function(foo) BayesCOOP:::filter_features(foo, abd_thresh, prev_thresh))
+xList_test <- lapply(xList_test, function(foo) BayesCOOP:::filter_features(foo, abd_thresh, prev_thresh))
+
+## Considering the common features between train and test set
+keep_features <- vector("list", length = length(xList_train))
+for(i in 1:length(keep_features)) {
+  keep_features[[i]] <- intersect(names(xList_train[[i]]), names(xList_test[[i]]))
+  xList_train[[i]] <- as.matrix(xList_train[[i]][, keep_features[[i]], drop = FALSE])
+  xList_test[[i]] <- as.matrix(xList_test[[i]][, keep_features[[i]], drop = FALSE])
+}
+
+data_train_processed <- BayesCOOP:::reconstruct_data(xList_train, y_train)
+data_test_processed <- BayesCOOP:::reconstruct_data(xList_test, y_test)
+
+```
+
+------------------------------------------------------------------------
+
+# 4. Fit BayesCOOP (Bayesian bootstrap enabled)
+
+Here we fit BayesCOOP using `bb = TRUE` to enable Bayesian bootstrap–based uncertainty estimation. This step may take a while because it involves multiple bootstrap iterations, which can be adjusted through the `bbiters` and `bbburn` parameters. The output includes the posterior samples of the parameters and runtime.
+
+
+```{r fit_bb_true}
+set.seed(123)
+fit_BayesCOOP_bb_true <- BayesCOOP::BayesCOOP(data_train = data_train_processed,
+  family = "gaussian",
+  ss = c(0.05, 1),
+  group = TRUE,
+  bb = TRUE,
+  alpha_dirich = 1,
+  bbiters = 1100,
+  bbburn = 100,
+  maxit = 100,
+  warning = TRUE,
+  verbose = FALSE,
+  control = list()
+)
+
+pred_BayesCOOP_bb_true <- predict(object = fit_BayesCOOP_bb_true,
+                                            newdata = data_test_processed, family = "gaussian",
+                                            bb = TRUE, warning = TRUE, verbose = TRUE)
+
+mspe_BayesCOOP_bb_true <- mean((pred_BayesCOOP_bb_true$y_pred - pred_BayesCOOP_bb_true$y_valid) ^ 2)
+```
+
+
+------------------------------------------------------------------------
+
+# 5. Fit BayesCOOP (Bayesian bootstrap disabled)
+
+We also run BayesCOOP again with `bb = FALSE` to obtain posterior mode estimates via a faster MAP-style variant (without bootstrap-based uncertainty). All other settings remain unchanged.
+```{r fit_bb_false}
+set.seed(123)
+fit_BayesCOOP_bb_false <- BayesCOOP::BayesCOOP(
+  data_train = data_train_processed,
+  family = "gaussian",
+  ss = c(0.05, 1),
+  group = TRUE,
+  bb = FALSE,
+  alpha_dirich = 1,
+  bbiters = 1100,
+  bbburn = 100,
+  maxit = 100,
+  warning = TRUE,
+  verbose = FALSE,
+  control = list(rho = 0.5)
+)
+
+pred_BayesCOOP_bb_false <- predict(object = fit_BayesCOOP_bb_false,
+                                            newdata = data_test_processed, family = "gaussian",
+                                            bb = FALSE, warning = TRUE, verbose = TRUE)
+
+mspe_BayesCOOP_bb_false <- mean((pred_BayesCOOP_bb_false$y_pred - pred_BayesCOOP_bb_false$y_valid) ^ 2)
+```
+
+------------------------------------------------------------------------
+
+# 6. Cooperative Learning Baselines
+
+Next, we construct three Cooperative Learning baselines using the multiview package: "Early" $(\rho = 0)$, "Intermediate" $(\rho = 0)$, and "Late" $(\rho = 0)$. We apply identical preprocessing steps—including feature filtering and alignment—cross-validate the regularization parameter, fit the models, and record the MSPE and runtime.
+
+```{r coop_baseline}
+set.seed(123)
+y_train <- BayesCOOP:::gen_datalist(data_train_processed)$y
+y_test  <- BayesCOOP:::gen_datalist(data_test_processed)$y
+xList_train <- BayesCOOP:::gen_datalist(data_train_processed)$xList
+xList_test  <- BayesCOOP:::gen_datalist(data_test_processed)$xList
+
+xList_train <- lapply(xList_train, as.matrix)
+xList_test <- lapply(xList_test, as.matrix)
+
+cvfit_alpha <- function(xlist, y, rho, alpha = 1, folds = 5) {
+  cvfit <- multiview::cv.multiview(x_list = xlist, y = y, rho = rho, alpha = alpha, nfolds = folds)
+  list(lambda_min = cvfit$lambda.min)
+}
+
+rhos_to_try <- c("Early" = 0, "Intermediate" = 0.5, "Late" = 1)
+coop_results <- lapply(names(rhos_to_try), function(label) {
+  rho_val <- rhos_to_try[[label]]
+  start_time <- Sys.time()
+  cvres <- cvfit_alpha(xList_train, y_train, rho = rho_val)
+  best_lambda <- cvres$lambda_min
+  fit_mv <- multiview::multiview(xList_train, y_train, lambda = best_lambda, rho = rho_val, alpha = 1)
+  y_pred_mv <- predict(fit_mv, newx = xList_test, s = best_lambda, rho = rho_val, alpha = 1)
+  mspe_mv <- mean((y_pred_mv - y_test)^2)
+  runtime_min <- round(as.numeric(difftime(Sys.time(), start_time, units = "mins")), 3)
+
+  coefs_mv <- coef(fit_mv, s = best_lambda, rho = rho_val, alpha = 1)
+  n_nonzero_mv <- sum(coefs_mv!=0)-1 # Exclude the intercept
+
+  list(method = label, rho = rho_val, mspe = mspe_mv, time_min = runtime_min, n_nonzero = n_nonzero_mv)
+})
+```
+
+------------------------------------------------------------------------
+
+# 7. Performance Comparison
+
+We next combine **Mean Squared Prediction Error (MSPE)** and **runtime** to assess both accuracy and computational efficiency across models.  Lower MSPE values indicate better predictive performance.
+
+```{r compare_performance}
+BayesCOOP_bb_true_summary <- list(
+  method = "BayesCOOP (bb=TRUE)",
+  mspe = mspe_BayesCOOP_bb_true,
+  time_min = fit_BayesCOOP_bb_true$time
+)
+
+BayesCOOP_bb_false_summary <- list(
+  method = "BayesCOOP (bb=FALSE)",
+  mspe = mspe_BayesCOOP_bb_false,
+  time_min = fit_BayesCOOP_bb_false$time
+)
+
+coop_df <- do.call(rbind, lapply(coop_results, function(res)
+  data.frame(method = paste0("Cooperative Learning (", res$method, ", rho=", res$rho, ")"),
+             mspe = res$mspe, time_min = res$time_min)))
+
+perf_table <- rbind(
+  data.frame(method = BayesCOOP_bb_true_summary$method,
+             mspe = BayesCOOP_bb_true_summary$mspe,
+             time_min = BayesCOOP_bb_true_summary$time_min),
+  data.frame(method = BayesCOOP_bb_false_summary$method,
+             mspe = BayesCOOP_bb_false_summary$mspe,
+             time_min = BayesCOOP_bb_false_summary$time_min),
+  coop_df
+)
+
+perf_table
+```
+
+------------------------------------------------------------------------
+
+# 8. Feature Selection / Sparsity Comparison
+
+Finally, we count the number of **selected (nonzero) features** for each method to compare their **sparsity** and **selection aggressiveness**.  
+
+```{r feature_selection_bcoop}
+n_nz_BayesCOOP_bb_true  <- sum(fit_BayesCOOP_bb_true$beta_postmed!=0)
+n_nz_BayesCOOP_bb_false <- sum(fit_BayesCOOP_bb_false$beta_MAP!=0)
+```
+
+```{r feature_selection_mv}
+coop_sparse_df <- do.call(rbind, lapply(coop_results, function(res)
+  data.frame(method = paste0("Cooperative Learning (", res$method, ", rho=", res$rho, ")"),
+             n_selected_feat = res$n_nonzero)))
+
+sparsity_table <- rbind(
+  data.frame(method = "BayesCOOP (bb=TRUE)",  n_selected_feat = n_nz_BayesCOOP_bb_true),
+  data.frame(method = "BayesCOOP (bb=FALSE)", n_selected_feat = n_nz_BayesCOOP_bb_false),
+  coop_sparse_df
+)
+
+sparsity_table
+```
+
+For this particular dataset, both BayesCOOP variants achieved lower MSPE compared to their frequentist counterparts, with the Bayesian Bootstrap version producing a more parsimonious model. For an in-depth biological interpretation of the feature selection results, please check out our [preprint](https://www.biorxiv.org/content/10.1101/2025.10.23.684056v1).
+
+------------------------------------------------------------------------
+
+# 9. Citation
+
+If you use **BayesCOOP** in your work, please cite:
+
+> Roy, S., Sarkar, S., Paul, E., Basak, P., Yi, N., & Mallick, H. (2025).  
+> **Bayesian Cooperative Learning for Multimodal Integration.** *bioRxiv.*  
+> [https://doi.org/10.1101/2025.10.23.684056](https://doi.org/10.1101/2025.10.23.684056)
+
+------------------------------------------------------------------------
+
+# 10. Session Info
+
+```{r sessioninfo}
+sessionInfo()
+
+
+
