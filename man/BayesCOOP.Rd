@@ -14,10 +14,7 @@ BayesCOOP(
   bbiters = 1100,
   bbburn = 100,
   maxit = 100,
-  filter = TRUE,
-  abd_thresh = 0,
-  prev_thresh = 0.1,
-  Warning = TRUE,
+  warning = TRUE,
   verbose = TRUE,
   control = list()
 )
@@ -45,18 +42,11 @@ estimation over a user-supplied rho grid in \code{control}. Default: TRUE.}
 
 \item{maxit}{maximum EM iterations in the inner optimizer. Default: 100.}
 
-\item{filter}{logical. If TRUE, apply abundance/prevalence filtering to features. Default: TRUE.}
-
-\item{abd_thresh}{minimum abundance threshold for keeping a feature. Default: 0.}
-
-\item{prev_thresh}{minimum prevalence threshold (proportion of samples above abd_thresh).
-Default: 0.1.}
-
-\item{Warning}{logical. If TRUE, emit non-convergence warnings. Default: TRUE.}
+\item{warning}{logical. If TRUE, emit non-convergence warnings. Default: TRUE.}
 
 \item{verbose}{logical. If TRUE, print iteration counts and runtime. Default: TRUE.}
 
-\item{control}{a named list with element \eqn{\rho}, giving one or more candidate rho values
+\item{control}{a named list with element \code{rho}, giving one or more candidate rho values
 to try when \code{bb = FALSE}.}
 }
 \value{

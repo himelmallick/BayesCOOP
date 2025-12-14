@@ -27,7 +27,7 @@ Description: BayesCOOP implements Bayesian cooperative learning for multimodal
     samples via maximum a posteriori (MAP) estimation on jittered and resampled 
     multimodal datasets. The current version supports continuous outcomes, with 
     additional outcome types planned for future releases.
-License: MIT + LICENSE
+License: MIT + file LICENSE
 Encoding: UTF-8
 Imports: caret, dplyr, glmnet, MCMCpack, rmutil, survival, truncnorm, utils
 Roxygen: list(markdown = TRUE)

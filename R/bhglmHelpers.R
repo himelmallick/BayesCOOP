@@ -312,7 +312,7 @@ bhglm.covariates <- function (x.con, x.cat, con.rescale = TRUE, cat.center = FAL
 bhglm.bmlasso.fit <- function (x, y, family = "gaussian", offset = NULL, epsilon = 1e-04, 
           maxit = 50, init = rep(0, ncol(x)), alpha = 1, ss = c(0.04, 
                                                                 0.5), b = 1, group = NULL, theta.weights = NULL, inter.hierarchy = NULL, 
-          inter.parents = NULL, Warning = FALSE) 
+          inter.parents = NULL, warning = FALSE) 
 {
     ss <- sort(ss)
     ss <- ifelse(ss <= 0, 0.001, ss)
@@ -403,7 +403,7 @@ bhglm.bmlasso.fit <- function (x, y, family = "gaussian", offset = NULL, epsilon
         }
         else devold <- dev
     }
-    if (Warning & !conv) 
+    if (warning & !conv) 
         warning("algorithm did not converge", call. = FALSE)
     f$x <- x
     f$y <- y
@@ -437,7 +437,7 @@ bhglm.bmlasso <- function (x, y, family = c("gaussian", "binomial", "poisson",
                            "cox"), offset = NULL, epsilon = 1e-04, maxit = 50, init = NULL, 
           alpha = c(1, 0), ss = c(0.04, 0.5), b = 1, group = NULL, 
           theta.weights = NULL, inter.hierarchy = NULL, inter.parents = NULL, 
-          Warning = FALSE, verbose = FALSE) 
+          warning = FALSE, verbose = FALSE) 
 {
     start.time <- Sys.time()
     call <- match.call()
@@ -467,7 +467,7 @@ bhglm.bmlasso <- function (x, y, family = c("gaussian", "binomial", "poisson",
                      epsilon = epsilon, maxit = maxit, init = init, group = group, 
                      alpha = alpha, ss = ss, b = b, theta.weights = theta.weights, 
                      inter.hierarchy = inter.hierarchy, inter.parents = inter.parents, 
-                     Warning = Warning)
+                     warning = warning)
     f$call <- call
     if (family == "cox") 
         class(f) <- c(class(f), "bmlasso", "COXPH")

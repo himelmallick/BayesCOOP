@@ -55,6 +55,33 @@ gen_datalist <- function(data) {
     list(xList = xList, y = y)
 }
 
+# Function to reconstruct data object from (xList, y)
+reconstruct_data <- function(xList, y) {
+  # Concatenate features across all omics layers
+  feature_table <- as.data.frame(do.call(cbind, xList))
+  
+  # --- feature_metadata ---
+  feature_metadata <- data.frame(
+    featureID <- colnames(feature_table),
+    featureType <- rep(names(xList), times = sapply(xList, ncol))
+  )
+  
+  rownames(feature_metadata) <- colnames(feature_table)
+  
+  # --- sample_metadata ---
+  sample_metadata <- data.frame(
+    subjectID <- rownames(xList[[1]]), Y = as.vector(y)
+  )
+  
+  rownames(sample_metadata) <- rownames(xList[[1]])
+  
+  # Return full data object
+  list(
+    feature_table = t(feature_table),
+    sample_metadata = sample_metadata,
+    feature_metadata = feature_metadata
+  )
+}
 
 # Function to have augmented data for cooperative learning application
 make_row  <- function(x_list, p_x, pair, rho) {
@@ -128,7 +155,7 @@ bmlasso.fit.weighted <- function (x, y, family = "gaussian", offset = NULL, epsi
                                   maxit = 50, init = rep(0, ncol(x)), alpha = 1,
                                   ss = c(0.05, 1), b = 1, lhood_weights = lhood_weights,
                                   jitter = 0, group = NULL, theta.weights = NULL, inter.hierarchy = NULL,
-                                  inter.parents = NULL, Warning = FALSE)
+                                  inter.parents = NULL, warning = FALSE)
 {
     ss <- sort(ss)
     ss <- ifelse(ss <= 0, 0.001, ss)
@@ -226,7 +253,7 @@ bmlasso.fit.weighted <- function (x, y, family = "gaussian", offset = NULL, epsi
             break
         } else devold <- dev
     }
-    if (Warning & !conv)
+    if (warning & !conv)
         warning("algorithm did not converge", call. = FALSE)
     f$x <- x
     f$y <- y
@@ -263,7 +290,7 @@ bmlasso.weighted <- function (x, y, family = c("gaussian", "binomial", "poisson"
                            "cox"), offset = NULL, epsilon = 1e-04, maxit = 50, init = NULL,
           alpha = c(1, 0), ss = c(0.04, 0.5), b = 1, group = NULL, lhood_weights = lhood_weights, jitter = NULL,
           theta.weights = NULL, inter.hierarchy = NULL, inter.parents = NULL,
-          Warning = FALSE, verbose = FALSE)
+          warning = FALSE, verbose = FALSE)
 {
     start.time <- Sys.time()
     call <- match.call()
@@ -294,7 +321,7 @@ bmlasso.weighted <- function (x, y, family = c("gaussian", "binomial", "poisson"
                      alpha = alpha, ss = ss, b = b, theta.weights = theta.weights,
                      lhood_weights = lhood_weights, jitter = jitter,
                      inter.hierarchy = inter.hierarchy, inter.parents = inter.parents,
-                     Warning = Warning)
+                     warning = warning)
     f$call <- call
     if (family == "cox")
         class(f) <- c(class(f), "bmlasso", "COXPH")
@@ -312,7 +339,7 @@ bmlasso.weighted <- function (x, y, family = c("gaussian", "binomial", "poisson"
 # Function to choose optimal rho for bmlasso
 bmlasso_cv = function(y, xList,
                       rho_grid, group, ss, family,
-                      maxit, Warning, verbose){
+                      maxit, warning, verbose){
 
     train_indx = sample(1:length(y), round(length(y) * 0.7))
     test_indx = setdiff(1:length(y), train_indx)
@@ -344,7 +371,7 @@ bmlasso_cv = function(y, xList,
         y_aug_train = dataAug_train$y_aug; x_aug_train = dataAug_train$x_aug
         fit_bmlasso_group = bhglm.bmlasso(x = as.matrix(x_aug_train), y = y_aug_train, family = family,
                                     maxit = maxit, alpha = 1, ss = ss,
-                                    group = group, Warning = TRUE, verbose = TRUE)
+                                    group = group, warning = TRUE, verbose = TRUE)
         beta_hat_group[[i]] = fit_bmlasso_group$coefficients[-1]
 
         ## Prediction
@@ -374,7 +401,7 @@ bmlasso_cv = function(y, xList,
     yAug = dataAug_train$y_aug; xAug = dataAug_train$x_aug
     model_bmlasso = bhglm.bmlasso(x = as.matrix(xAug), y = yAug, family = family,
                             maxit = maxit, alpha = 1, ss = ss,
-                            group = group, Warning = TRUE, verbose = TRUE)
+                            group = group, warning = TRUE, verbose = TRUE)
     beta_hat_bmlasso = model_bmlasso$coefficients[-1]
 
     return(list(beta_hat_bmlasso = beta_hat_bmlasso, rho_bmlasso = rho_bmlasso))
