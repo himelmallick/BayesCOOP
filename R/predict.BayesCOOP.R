@@ -19,7 +19,7 @@
 #' \item{y_pred}{predicted response values for data}
 #' \item{y_valid}{True values of response in the validation dataset}
 #'
-#' @importFrom stats rnorm quantile median
+#' @importFrom stats rnorm median
 #' @method predict BayesCOOP
 #' @export
 predict.BayesCOOP <- function(object, newdata,
