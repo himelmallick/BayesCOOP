@@ -8,7 +8,8 @@ output:
     toc_depth: 3
     toc_float: true
     number_sections: false
-date: "2025-12-14"
+    output_dir: "."
+date: "2025-12-29"
 ---
 
 ```{r setup, include=FALSE}
@@ -63,9 +64,12 @@ The dataset is divided into **training** and **validation** sets, each provided 
 - **`sample_metadata`** – accompanying sample-level information, including phenotype, covariates, and grouping variables.
 
 ```{r load_data}
+## Load train data
 data_train <- get(load(url(
   "https://raw.githubusercontent.com/himelmallick/IntegratedLearner/master/data/StelzerDOS.RData"
 )))
+
+## Load test data
 data_test <- get(load(url(
   "https://raw.githubusercontent.com/himelmallick/IntegratedLearner/master/data/StelzerDOS_valid.RData"
 )))
@@ -78,6 +82,7 @@ data_test <- get(load(url(
 We remove metabolomics features since it’s not present in the validation set. Then we realign the feature tables to the filtered metadata so that only valid rows and columns remain. Finally, we consider baseline samples only—training samples labeled with “A” and test samples labeled with “G1”—ensuring that both features and sample metadata stay perfectly synchronized across datasets.
 
 ```{r preprocess_data}
+## Removing Metabolomics
 data_train$feature_metadata <- data_train$feature_metadata %>%
   filter(featureType != "Metabolomics")
 
@@ -85,14 +90,17 @@ data_train$feature_table <- data_train$feature_table[
   rownames(data_train$feature_metadata), , drop = FALSE
 ]
 
+## Selecting baseline observations from train data
 pos_train <- grep("A", colnames(data_train$feature_table), ignore.case = TRUE)
 data_train$feature_table  <- data_train$feature_table[, pos_train, drop = FALSE]
 data_train$sample_metadata <- data_train$sample_metadata[pos_train, , drop = FALSE]
 
+## Selecting baseline observations from test data
 pos_test <- grep("G1", colnames(data_test$feature_table))
 data_test$feature_table   <- data_test$feature_table[, pos_test, drop = FALSE]
 data_test$sample_metadata <- data_test$sample_metadata[pos_test, , drop = FALSE]
 
+## Filtering features according to abundance and prevalence threshold
 xList_train <- BayesCOOP:::gen_datalist(data_train)$xList
 y_train <- BayesCOOP:::gen_datalist(data_train)$y
 xList_test <- BayesCOOP:::gen_datalist(data_test)$xList
@@ -109,6 +117,7 @@ for(i in 1:length(keep_features)) {
   xList_test[[i]] <- as.matrix(xList_test[[i]][, keep_features[[i]], drop = FALSE])
 }
 
+# Reconstructing the train and testing data object
 data_train_processed <- BayesCOOP:::reconstruct_data(xList_train, y_train)
 data_test_processed <- BayesCOOP:::reconstruct_data(xList_test, y_test)
 
@@ -123,6 +132,8 @@ Here we fit BayesCOOP using `bb = TRUE` to enable Bayesian bootstrap–based unc
 
 ```{r fit_bb_true}
 set.seed(123)
+
+## Fitting BayesCOOP
 fit_BayesCOOP_bb_true <- BayesCOOP::BayesCOOP(data_train = data_train_processed,
   family = "gaussian",
   ss = c(0.05, 1),
@@ -137,11 +148,14 @@ fit_BayesCOOP_bb_true <- BayesCOOP::BayesCOOP(data_train = data_train_processed,
   control = list()
 )
 
+## Prediction
 pred_BayesCOOP_bb_true <- predict(object = fit_BayesCOOP_bb_true,
                                             newdata = data_test_processed, family = "gaussian",
                                             bb = TRUE, warning = TRUE, verbose = TRUE)
 
+## Calculating mean squared prediction error
 mspe_BayesCOOP_bb_true <- mean((pred_BayesCOOP_bb_true$y_pred - pred_BayesCOOP_bb_true$y_valid) ^ 2)
+print(mspe_BayesCOOP_bb_true)
 ```
 
 
@@ -152,6 +166,8 @@ mspe_BayesCOOP_bb_true <- mean((pred_BayesCOOP_bb_true$y_pred - pred_BayesCOOP_b
 We also run BayesCOOP again with `bb = FALSE` to obtain posterior mode estimates via a faster MAP-style variant (without bootstrap-based uncertainty). All other settings remain unchanged.
 ```{r fit_bb_false}
 set.seed(123)
+
+## Fitting BayesCOOP with `bb` = FALSE
 fit_BayesCOOP_bb_false <- BayesCOOP::BayesCOOP(
   data_train = data_train_processed,
   family = "gaussian",
@@ -167,11 +183,14 @@ fit_BayesCOOP_bb_false <- BayesCOOP::BayesCOOP(
   control = list(rho = 0.5)
 )
 
+## Prediction
 pred_BayesCOOP_bb_false <- predict(object = fit_BayesCOOP_bb_false,
                                             newdata = data_test_processed, family = "gaussian",
                                             bb = FALSE, warning = TRUE, verbose = TRUE)
 
+## Calculating mean squared prediction error
 mspe_BayesCOOP_bb_false <- mean((pred_BayesCOOP_bb_false$y_pred - pred_BayesCOOP_bb_false$y_valid) ^ 2)
+print(mspe_BayesCOOP_bb_false)
 ```
 
 ------------------------------------------------------------------------
@@ -182,19 +201,23 @@ Next, we construct three Cooperative Learning baselines using the multiview pack
 
 ```{r coop_baseline}
 set.seed(123)
+## Constructing the data for multiview implementation
 y_train <- BayesCOOP:::gen_datalist(data_train_processed)$y
 y_test  <- BayesCOOP:::gen_datalist(data_test_processed)$y
 xList_train <- BayesCOOP:::gen_datalist(data_train_processed)$xList
 xList_test  <- BayesCOOP:::gen_datalist(data_test_processed)$xList
 
+## Matrix datatype conversion
 xList_train <- lapply(xList_train, as.matrix)
 xList_test <- lapply(xList_test, as.matrix)
 
+## Choosing lambda using cross validation
 cvfit_alpha <- function(xlist, y, rho, alpha = 1, folds = 5) {
   cvfit <- multiview::cv.multiview(x_list = xlist, y = y, rho = rho, alpha = alpha, nfolds = folds)
   list(lambda_min = cvfit$lambda.min)
 }
 
+## Different rho values for choice of fusion schemes
 rhos_to_try <- c("Early" = 0, "Intermediate" = 0.5, "Late" = 1)
 coop_results <- lapply(names(rhos_to_try), function(label) {
   rho_val <- rhos_to_try[[label]]
@@ -220,22 +243,26 @@ coop_results <- lapply(names(rhos_to_try), function(label) {
 We next combine **Mean Squared Prediction Error (MSPE)** and **runtime** to assess both accuracy and computational efficiency across models.  Lower MSPE values indicate better predictive performance.
 
 ```{r compare_performance}
+## Performance summary for BayesCOOP with `bb` = TRUE
 BayesCOOP_bb_true_summary <- list(
   method = "BayesCOOP (bb=TRUE)",
   mspe = mspe_BayesCOOP_bb_true,
   time_min = fit_BayesCOOP_bb_true$time
 )
 
+## Performance summary for BayesCOOP with `bb` = FALSE
 BayesCOOP_bb_false_summary <- list(
   method = "BayesCOOP (bb=FALSE)",
   mspe = mspe_BayesCOOP_bb_false,
   time_min = fit_BayesCOOP_bb_false$time
 )
 
+## Performance summary for multiview
 coop_df <- do.call(rbind, lapply(coop_results, function(res)
   data.frame(method = paste0("Cooperative Learning (", res$method, ", rho=", res$rho, ")"),
              mspe = res$mspe, time_min = res$time_min)))
 
+## Table for performance comparison
 perf_table <- rbind(
   data.frame(method = BayesCOOP_bb_true_summary$method,
              mspe = BayesCOOP_bb_true_summary$mspe,
@@ -246,7 +273,8 @@ perf_table <- rbind(
   coop_df
 )
 
-perf_table
+## Print the performance table
+print(perf_table)
 ```
 
 ------------------------------------------------------------------------
@@ -256,11 +284,14 @@ perf_table
 Finally, we count the number of **selected (nonzero) features** for each method to compare their **sparsity** and **selection aggressiveness**.  
 
 ```{r feature_selection_bcoop}
+## Number of features selected for BayesCOOP with `bb` = TRUE
 n_nz_BayesCOOP_bb_true  <- sum(fit_BayesCOOP_bb_true$beta_postmed!=0)
+## Number of features selected for BayesCOOP with `bb` = FALSE
 n_nz_BayesCOOP_bb_false <- sum(fit_BayesCOOP_bb_false$beta_MAP!=0)
 ```
 
 ```{r feature_selection_mv}
+## Number of fratures selected for multiview
 coop_sparse_df <- do.call(rbind, lapply(coop_results, function(res)
   data.frame(method = paste0("Cooperative Learning (", res$method, ", rho=", res$rho, ")"),
              n_selected_feat = res$n_nonzero)))
@@ -271,6 +302,7 @@ sparsity_table <- rbind(
   coop_sparse_df
 )
 
+## Print table comparing the number of selected features for diff methods
 sparsity_table
 ```
 
@@ -292,6 +324,5 @@ If you use **BayesCOOP** in your work, please cite:
 
 ```{r sessioninfo}
 sessionInfo()
-
-
+```
 
