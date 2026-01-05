@@ -1,6 +1,7 @@
 ---
 title: "BayesCOOP: End-to-End Tutorial"
 author: "Saptarshi Roy, Sreya Sarkar, Himel Mallick"
+date: "Last updated: `r format(Sys.Date(), '%B %d, %Y')`"
 output:
   html_document:
     theme: readable
@@ -9,7 +10,6 @@ output:
     toc_float: true
     number_sections: false
     output_dir: "."
-date: "2025-12-29"
 ---
 
 ```{r setup, include=FALSE}
