@@ -67,6 +67,7 @@ reconstruct_data <- function(xList, y) {
   )
   
   rownames(feature_metadata) <- colnames(feature_table)
+  colnames(feature_metadata) <- c("featureID", "featureType")
   
   # --- sample_metadata ---
   sample_metadata <- data.frame(
