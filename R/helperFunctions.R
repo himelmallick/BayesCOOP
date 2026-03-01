@@ -73,6 +73,7 @@ reconstruct_data <- function(xList, y) {
     subjectID <- rownames(xList[[1]]), Y = as.vector(y)
   )
   
+  colnames(sample_metadata) <- c("subjectID", "Y")
   rownames(sample_metadata) <- rownames(xList[[1]])
   
   # Return full data object
