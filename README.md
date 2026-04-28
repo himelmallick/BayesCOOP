@@ -34,7 +34,7 @@ Here is a minimal call to `BayesCOOP()`:
 
 ```r
 fit <- BayesCOOP::BayesCOOP(
-  data_train,           # list with feature_table, sample_metadata and feature_metadata (train)
+  data_train,           # MultiAssayExperiment with >=2 modalities in experiments() and outcome Y in colData()
   family       = "gaussian",   # currently only continuous outcomes are supported
   ss           = c(0.05, 1),   # spike-and-slab scales (s0, s1); controls sparsity
   group        = TRUE,         # whether to apply group-wise shrinkage by modality

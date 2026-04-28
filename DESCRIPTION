@@ -1,7 +1,7 @@
 Package: BayesCOOP
 Type: Package
 Title: Bayesian Cooperative Learning for Multimodal Integration
-Version: 0.1.0
+Version: 0.99.0
 Authors@R: c(
     person(
       "Saptarshi", "Roy",
@@ -16,7 +16,8 @@ Authors@R: c(
     person(
       "Himel", "Mallick",
       email = "him4004@med.cornell.edu",
-      role = c("aut", "cre")
+      role = c("aut", "cre"),
+      comment = c(ORCID = "0000-0003-4956-2429")
     )
   )
 Description: BayesCOOP implements Bayesian cooperative learning for multimodal 
@@ -29,7 +30,14 @@ Description: BayesCOOP implements Bayesian cooperative learning for multimodal
     additional outcome types planned for future releases.
 License: MIT + file LICENSE
 Encoding: UTF-8
-Imports: caret, dplyr, glmnet, MCMCpack, rmutil, survival, truncnorm, utils
+biocViews: Software, StatisticalMethod, Regression, Bayesian, GeneExpression,
+    Proteomics
+URL: https://github.com/himelmallick/BayesCOOP
+BugReports: https://github.com/himelmallick/BayesCOOP/issues
+Imports: caret, dplyr, glmnet, MCMCpack, methods, MultiAssayExperiment,
+    rmutil, S4Vectors, SummarizedExperiment, survival, truncnorm, utils
+Suggests: knitr, multiview, rmarkdown, testthat
+VignetteBuilder: knitr
+Config/testthat/edition: 3
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
-

@@ -15,73 +15,121 @@
 #' @importFrom MCMCpack rdirichlet
 #' @importFrom rmutil rlaplace
 #' @importFrom truncnorm rtruncnorm
+#' @importFrom methods is
+#' @importFrom MultiAssayExperiment MultiAssayExperiment experiments intersectColumns
+#' @importFrom SummarizedExperiment assay colData
+#' @importFrom S4Vectors DataFrame
 NULL
 ###############################################
 ############## helper functions ###############
 ###############################################
 
-# Function to reformat the data for cooperative learning application
-gen_datalist <- function(data) {
-    feature_table <- data$feature_table
-    sample_metadata <- data$sample_metadata
-    feature_metadata <- data$feature_metadata
+# Function to reformat MAE data for cooperative learning
+gen_datalist <- function(data, y_col = "Y") {
+    if (!methods::is(data, "MultiAssayExperiment")) {
+        stop("`data` must be a MultiAssayExperiment object.")
+    }
 
-    ## Separate omics layers
-    feature_metadata$featureType <- as.factor(feature_metadata$featureType)
-    name_layers <- with(droplevels(feature_metadata),
-                       list(levels = levels(featureType)),
-                       nlevels = nlevels(featureType))$levels
+    data <- MultiAssayExperiment::intersectColumns(data)
+    exp_list <- MultiAssayExperiment::experiments(data)
 
-    ## Extract y
-    y <- as.matrix(sample_metadata$Y)
+    if (length(exp_list) < 2) {
+        stop("BayesCOOP requires at least two assays in `experiments(data)`.")
+    }
 
-    ## Construct xList
-    xList <- vector("list", length = length(name_layers))
-    names(xList) <- name_layers
+    if (is.null(names(exp_list)) || any(names(exp_list) == "")) {
+        stop("All assays in `experiments(data)` must be named.")
+    }
 
-    ## Store data matrices
-    for (i in seq_along(name_layers)) {
-        ## Filter genes which belong to featureType[i]
-        include_list <- feature_metadata %>% dplyr::filter(featureType == name_layers[i])
+    sample_metadata <- as.data.frame(SummarizedExperiment::colData(data))
+    if (!(y_col %in% colnames(sample_metadata))) {
+        stop("Response column `", y_col, "` is missing in colData(data)!")
+    }
+    if (is.null(rownames(sample_metadata))) {
+        stop("colData(data) must have row names corresponding to sample IDs.")
+    }
 
-        ## Subset feature rows for features in Type[i]
-        t_dat_slice <- feature_table[rownames(feature_table) %in% include_list$featureID, ]
+    sample_ids <- rownames(sample_metadata)
+    if (length(sample_ids) == 0) {
+        stop("No shared samples remain after intersectColumns(data).")
+    }
 
-        ## Assign feature rows for Type[i] to dataList[i]
-        xList[[i]] <- as.data.frame(t(t_dat_slice))
-        rm(t_dat_slice); rm(include_list)
+    y <- as.matrix(sample_metadata[[y_col]])
+    rownames(y) <- sample_ids
+
+    xList <- vector("list", length(exp_list))
+    names(xList) <- names(exp_list)
+
+    for (i in seq_along(exp_list)) {
+        assay_i <- exp_list[[i]]
+        if (methods::is(assay_i, "SummarizedExperiment")) {
+            assay_mat <- as.matrix(SummarizedExperiment::assay(assay_i))
+        } else {
+            assay_mat <- as.matrix(assay_i)
+        }
+
+        if (is.null(colnames(assay_mat))) {
+            stop("Each assay in `experiments(data)` must have sample IDs as column names.")
+        }
+        if (!all(sample_ids %in% colnames(assay_mat))) {
+            stop(
+                "Assay `", names(exp_list)[i],
+                "` is missing at least one sample present in colData(data)."
+            )
+        }
+        assay_mat <- assay_mat[, sample_ids, drop = FALSE]
+        xList[[i]] <- as.data.frame(t(assay_mat))
     }
 
     list(xList = xList, y = y)
 }
 
-# Function to reconstruct data object from (xList, y)
-reconstruct_data <- function(xList, y) {
-  # Concatenate features across all omics layers
-  feature_table <- as.data.frame(do.call(cbind, xList))
-  
-  # --- feature_metadata ---
-  feature_metadata <- data.frame(
-    featureID <- colnames(feature_table),
-    featureType <- rep(names(xList), times = sapply(xList, ncol))
-  )
-  
-  rownames(feature_metadata) <- colnames(feature_table)
-  colnames(feature_metadata) <- c("featureID", "featureType")
-  
-  # --- sample_metadata ---
-  sample_metadata <- data.frame(
-    subjectID <- rownames(xList[[1]]), Y = as.vector(y)
-  )
-  
-  colnames(sample_metadata) <- c("subjectID", "Y")
-  rownames(sample_metadata) <- rownames(xList[[1]])
-  
-  # Return full data object
-  list(
-    feature_table = t(feature_table),
-    sample_metadata = sample_metadata,
-    feature_metadata = feature_metadata
+# Function to reconstruct a MultiAssayExperiment object from (xList, y)
+reconstruct_data <- function(xList, y, y_col = "Y") {
+  if (length(xList) < 2) {
+    stop("xList must contain at least two assays.")
+  }
+
+  if (is.null(names(xList)) || any(names(xList) == "")) {
+    names(xList) <- paste0("view", seq_along(xList))
+  }
+
+  sample_ids <- rownames(xList[[1]])
+  if (is.null(sample_ids)) {
+    sample_ids <- paste0("sample", seq_len(nrow(xList[[1]])))
+  }
+
+  for (i in seq_along(xList)) {
+    if (is.null(rownames(xList[[i]]))) {
+      rownames(xList[[i]]) <- sample_ids
+    }
+    if (!identical(rownames(xList[[i]]), sample_ids)) {
+      stop("All assays in xList must have the same sample IDs in the same order.")
+    }
+  }
+
+  assays <- lapply(seq_along(xList), function(i) {
+    assay_i <- as.matrix(xList[[i]])
+    if (is.null(colnames(assay_i))) {
+      colnames(assay_i) <- paste0(names(xList)[i], "_feature", seq_len(ncol(assay_i)))
+    }
+    if (is.null(rownames(assay_i))) {
+      rownames(assay_i) <- sample_ids
+    }
+    t(assay_i)
+  })
+  names(assays) <- names(xList)
+
+  if (nrow(y) != length(sample_ids)) {
+    stop("`y` must have one value per sample in xList.")
+  }
+
+  col_data <- S4Vectors::DataFrame(row.names = sample_ids)
+  col_data[[y_col]] <- as.vector(y)
+
+  MultiAssayExperiment::MultiAssayExperiment(
+    experiments = assays,
+    colData = col_data
   )
 }
 
@@ -117,7 +165,7 @@ data.Augment.mviews <- function(y, dataList, rho){
 
     rows <- lapply(pairs, make_row, x_list = dataList, p_x = p_x, rho = rho)
     # matching the column names
-    for(i in 1:length(rows)){
+    for(i in seq_len(length(rows))){
         colnames(rows[[i]]) <- colnames(x)
     }
     xt <- do.call(rbind, c(list(x), rows))
@@ -132,7 +180,9 @@ data.Augment.mviews <- function(y, dataList, rho){
 }
 
 data.Augment <- function(y, dataList, rho){
-    if(length(dataList) == 2) {
+    if(length(dataList) < 2) {
+        stop("BayesCOOP requires at least two modalities.")
+    } else if(length(dataList) == 2) {
         dataAug <- data.Augment.2views(y = y, dataList = dataList, rho = rho)
     } else {
         dataAug <- data.Augment.mviews(y = y, dataList = dataList, rho = rho)
@@ -176,7 +226,7 @@ bmlasso.fit.weighted <- function (x, y, family = "gaussian", offset = NULL, epsi
     prior.scale <- d$prior.scale
 
     ###############################################
-    prior.mean = d$prior.mean[-length(d$prior.mean)] # Additional line
+    prior.mean <- d$prior.mean[-length(d$prior.mean)] # Additional line
     ###############################################
 
     group <- d$group
@@ -200,10 +250,10 @@ bmlasso.fit.weighted <- function (x, y, family = "gaussian", offset = NULL, epsi
     names(theta.weights) <- gvars
     if (length(b) < length(group.vars))
         b <- c(b, rep(b[length(b)], length(group.vars) - length(b)))
-    b <- b[1:length(group.vars)]
+    b <- b[seq_len(length(group.vars))]
     bb <- b
     if (is.null(init)) {
-        for (k in 1:5) {
+        for (k in seq_len(5)) {
             ps <- ss[1] + (k - 1) * 0.01
             if (family == "cox")
                 ps <- min(ss[1] + (k - 1) * 0.01, 0.08)
@@ -217,19 +267,19 @@ bmlasso.fit.weighted <- function (x, y, family = "gaussian", offset = NULL, epsi
         }
     } else
         b <- as.numeric(init)
-    names(b) = gvars # names(b) <- colnames(x)
+    names(b) <- gvars # names(b) <- colnames(x)
     b <- ifelse(b == 0, 0.001, b)
     init <- b
     devold <- 0
     conv <- FALSE
-    for (iter in 1:maxit) {
+    for (iter in seq_len(maxit)) {
         if (alpha == 1)
             out <- bhglm.update.scale.p(prior = "mde", b0 = (b[gvars] - prior.mean[-1]),
                                   ss = ss, theta = theta) else
                                       out <- bhglm.update.scale.p(prior = "mt", df = 1e+10,
                                    b0 = b[gvars], ss = ss, theta = theta)
         # prior.scale[gvars] <- out[[1]]
-        prior.scale = out[[1]]
+        prior.scale <- out[[1]]
         p <- out[[2]]
         if (!is.matrix(group))
             theta <- bhglm.update.ptheta.group(group.vars = group.vars,
@@ -247,7 +297,7 @@ bmlasso.fit.weighted <- function (x, y, family = "gaussian", offset = NULL, epsi
                     alpha = alpha, penalty.factor = Pf, weights = lhood_weights,
                     lambda = sum(Pf)/(nrow(x) * ncol(x)), standardize = FALSE)
         b <- as.numeric(f$beta)
-        names(b) = gvars                   # names(b) <- colnames(x)
+        names(b) <- gvars                   # names(b) <- colnames(x)
         dev <- deviance(f)
         if (abs(dev - devold)/(0.1 + abs(dev)) < epsilon & iter >
             5) {
@@ -298,7 +348,7 @@ bmlasso.weighted <- function (x, y, family = c("gaussian", "binomial", "poisson"
     call <- match.call()
     x <- as.matrix(x)
     if (is.null(colnames(x)))
-        colnames(x) <- paste("x", 1:ncol(x), sep = "")
+        colnames(x) <- paste("x", seq_len(ncol(x)), sep = "")
     nobs <- nrow(x)
     if (NROW(y) != nobs)
         stop("nobs of 'x' and 'y' are different")
@@ -332,79 +382,83 @@ bmlasso.weighted <- function (x, y, family = c("gaussian", "binomial", "poisson"
     minutes <- round(difftime(stop.time, start.time, units = "min"),
                      3)
     if (verbose) {
-        cat("EM Coordinate Decent Iterations:", f$iter, "\n")
-        cat("Computational time:", minutes, "minutes \n")
+        message("EM Coordinate Decent Iterations: ", f$iter)
+        message("Computational time: ", minutes, " minutes")
     }
     return(f)
 }
 
 # Function to choose optimal rho for bmlasso
-bmlasso_cv = function(y, xList,
+bmlasso_cv <- function(y, xList,
                       rho_grid, group, ss, family,
                       maxit, warning, verbose){
 
-    train_indx = sample(1:length(y), round(length(y) * 0.7))
-    test_indx = setdiff(1:length(y), train_indx)
-    y_train = y[train_indx]; y_train = y_train - mean(y_train)
-    y_test = y[test_indx]; y_test = y_test - mean(y_test)
-    xList_train = lapply(xList, function(foo) foo[train_indx, ])
-    xList_test = lapply(xList, function(foo) foo[test_indx, ])
+    if (length(xList) < 2) {
+        stop("BayesCOOP requires at least two modalities.")
+    }
+
+    train_indx <- sample(seq_len(length(y)), round(length(y) * 0.7))
+    test_indx <- setdiff(seq_len(length(y)), train_indx)
+    y_train <- y[train_indx]; y_train <- y_train - mean(y_train)
+    y_test <- y[test_indx]; y_test <- y_test - mean(y_test)
+    xList_train <- lapply(xList, function(foo) foo[train_indx, ])
+    xList_test <- lapply(xList, function(foo) foo[test_indx, ])
 
     ## Scaling the predictors
-    xList_train_std = lapply(xList_train, function(foo) as.data.frame(scale(foo)))
-    xList_test_std = lapply(xList_test, function(foo) as.data.frame(scale(foo)))
+    xList_train_std <- lapply(xList_train, function(foo) as.data.frame(scale(foo)))
+    xList_test_std <- lapply(xList_test, function(foo) as.data.frame(scale(foo)))
 
     # initialize variables to store output
-    mspe_bmlasso_group = rep(0, length(rho_grid))
-    beta_hat_group = vector("list", length(rho_grid))
+    mspe_bmlasso_group <- rep(0, length(rho_grid))
+    beta_hat_group <- vector("list", length(rho_grid))
 
     # grid search for optimal rho
-    for(i in 1:length(rho_grid)){
+    for(i in seq_len(length(rho_grid))){
         ## Augmented data
         if(length(xList_train) == 2) {
-            dataAug_train = data.Augment.2views(y_train, xList_train_std, rho_grid[i])
-            dataAug_test = data.Augment.2views(y_test, xList_test_std, rho_grid[i])
+            dataAug_train <- data.Augment.2views(y_train, xList_train_std, rho_grid[i])
+            dataAug_test <- data.Augment.2views(y_test, xList_test_std, rho_grid[i])
         } else {
-            dataAug_train = data.Augment.mviews(y_train, xList_train_std, rho_grid[i])
-            dataAug_test = data.Augment.mviews(y_test, xList_test_std, rho_grid[i])
+            dataAug_train <- data.Augment.mviews(y_train, xList_train_std, rho_grid[i])
+            dataAug_test <- data.Augment.mviews(y_test, xList_test_std, rho_grid[i])
         }
 
         ## bmlasso with grouped predictors for fixed rho
-        y_aug_train = dataAug_train$y_aug; x_aug_train = dataAug_train$x_aug
-        fit_bmlasso_group = bhglm.bmlasso(x = as.matrix(x_aug_train), y = y_aug_train, family = family,
+        y_aug_train <- dataAug_train$y_aug; x_aug_train <- dataAug_train$x_aug
+        fit_bmlasso_group <- bhglm.bmlasso(x = as.matrix(x_aug_train), y = y_aug_train, family = family,
                                     maxit = maxit, alpha = 1, ss = ss,
                                     group = group, warning = TRUE, verbose = TRUE)
-        beta_hat_group[[i]] = fit_bmlasso_group$coefficients[-1]
+        beta_hat_group[[i]] <- fit_bmlasso_group$coefficients[-1]
 
         ## Prediction
-        y_aug_test = dataAug_test$y_aug; x_aug_test = dataAug_test$x_aug
-        y_aug_hat_group = as.matrix(x_aug_test) %*% beta_hat_group[[i]]
+        y_aug_test <- dataAug_test$y_aug; x_aug_test <- dataAug_test$x_aug
+        y_aug_hat_group <- as.matrix(x_aug_test) %*% beta_hat_group[[i]]
 
         ## Consider the first length(test.y) values from yhat[[k]] for predicted values of y
-        y_pred_group = y_aug_hat_group[(1:length(y_test))]
+        y_pred_group <- y_aug_hat_group[seq_len(length(y_test))]
 
         ## mean squared prediction error calculation
-        mspe_bmlasso_group[i] = mean((y_pred_group - y_test) ^ 2)
+        mspe_bmlasso_group[i] <- mean((y_pred_group - y_test) ^ 2)
     }
     # find index corresponding to lowest mse
-    opt_index = which.min(mspe_bmlasso_group)
-    rho_bmlasso = rho_grid[opt_index]
+    opt_index <- which.min(mspe_bmlasso_group)
+    rho_bmlasso <- rho_grid[opt_index]
 
     ### fitting optimum model to obtain beta_hat
-    y = y - mean(y)
-    xList_std = lapply(xList, function(foo) as.data.frame(scale(foo)))
+    y <- y - mean(y)
+    xList_std <- lapply(xList, function(foo) as.data.frame(scale(foo)))
 
     if(length(xList_std) == 2) {
-        dataAug_train = data.Augment.2views(y, xList_std, rho_bmlasso)
+        dataAug_train <- data.Augment.2views(y, xList_std, rho_bmlasso)
     } else {
-        dataAug_train = data.Augment.mviews(y, xList_std, rho_bmlasso)
+        dataAug_train <- data.Augment.mviews(y, xList_std, rho_bmlasso)
     }
 
-    yAug = dataAug_train$y_aug; xAug = dataAug_train$x_aug
-    model_bmlasso = bhglm.bmlasso(x = as.matrix(xAug), y = yAug, family = family,
+    yAug <- dataAug_train$y_aug; xAug <- dataAug_train$x_aug
+    model_bmlasso <- bhglm.bmlasso(x = as.matrix(xAug), y = yAug, family = family,
                             maxit = maxit, alpha = 1, ss = ss,
                             group = group, warning = TRUE, verbose = TRUE)
-    beta_hat_bmlasso = model_bmlasso$coefficients[-1]
+    beta_hat_bmlasso <- model_bmlasso$coefficients[-1]
 
     return(list(beta_hat_bmlasso = beta_hat_bmlasso, rho_bmlasso = rho_bmlasso))
 }

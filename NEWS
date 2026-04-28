@@ -1,0 +1,9 @@
+CHANGES IN BayesCOOP VERSION 0.99.0
+
+USER VISIBLE CHANGES
+
+o Switched input interface to MultiAssayExperiment objects.
+o Added vignette registration metadata for R Markdown vignettes.
+o Added runnable BayesCOOP() examples in documentation.
+o Updated maintainer metadata to include ORCID.
+o Added Bioconductor metadata fields in DESCRIPTION.

@@ -3,7 +3,9 @@
 #' @description This function predicts the response from a fitted object using BayesCOOP methodology. Currently, only continuous outcomes are supported.
 #'
 #' @param object fitted object returned by the function \code{\link{BayesCOOP}} implemented on the training dataset.
-#' @param newdata a list of feature_table, sample_metadata and feature_metadata from validation dataset (unstandardized). See \emph{IntegratedLearner} for more details.
+#' @param newdata validation input data as a
+#' \code{MultiAssayExperiment::MultiAssayExperiment} with at least two assays in
+#' \code{experiments(newdata)} and response \code{Y} in \code{colData(newdata)}.
 #' @param family currently supports only Gaussian family. Default: "gaussian".
 #' @param bb logical. If TRUE, posterior predictive sampling is performed using the posterior median of \eqn{rho} stored in the fitted object; if FALSE, point prediction is provided for MAP estimate of \eqn{rho} stored in the fitted object. Default: TRUE.
 #' @param warning logical. If TRUE, emit non-convergence warnings. Default: TRUE.
@@ -28,8 +30,6 @@ predict.BayesCOOP <- function(object, newdata,
                               warning = TRUE, verbose = TRUE, ...) {
   
   # Some basic checks
-  if(length(newdata) != 3 | any(names(newdata) != c("feature_table", "sample_metadata", "feature_metadata")) == TRUE)
-    stop("newdata must be a list of feature_table, sample_metadata and feature_metadata!")
   if(family != "gaussian")
     stop("Non-gaussian families are currently not supported!")
   
@@ -39,8 +39,12 @@ predict.BayesCOOP <- function(object, newdata,
   ######################### data pre-processing ###########################
   #########################################################################
   
-  y_test <- gen_datalist(newdata)$y
-  xList_test <- gen_datalist(newdata)$xList
+  parsed_new <- gen_datalist(newdata)
+  y_test <- parsed_new$y
+  xList_test <- parsed_new$xList
+  if (length(xList_test) < 2) {
+    stop("BayesCOOP requires at least two modalities.")
+  }
   
   ## Scaling the predictors
   xList_test_std <- lapply(xList_test, function(foo) as.data.frame(scale(foo)))
@@ -59,9 +63,9 @@ predict.BayesCOOP <- function(object, newdata,
     dataAug_test <- data.Augment(y = NULL, xList_test_std, object$rho_postmed)
     x_aug_test <- as.matrix(dataAug_test$x_aug)
     
-    y_aug_samples <- do.call("rbind", lapply(1:nrow(y_samples),
+    y_aug_samples <- do.call("rbind", lapply(seq_len(nrow(y_samples)),
                                              function(tt) {drop(x_aug_test %*% object$beta_samples[tt, ]) + rnorm(nrow(x_aug_test), 0, sqrt(object$errVar_samples[tt]))}))
-    y_samples <- y_aug_samples[, 1:nrow(xList_test[[1]])]
+    y_samples <- y_aug_samples[, seq_len(nrow(xList_test[[1]]))]
     y_pred <- apply(y_samples, 2, median)
     
     ## Returning predictions
@@ -76,7 +80,7 @@ predict.BayesCOOP <- function(object, newdata,
     dataAug_test <- data.Augment(y = NULL, xList_test_std, object$rho_MAP)
     x_aug_test <- as.matrix(dataAug_test$x_aug)
     y_aug_hat <- x_aug_test %*% object$beta_MAP
-    y_pred <- y_aug_hat[1:nrow(xList_test[[1]])]
+    y_pred <- y_aug_hat[seq_len(nrow(xList_test[[1]]))]
     
     output$y_pred <- y_pred + mean(y_test)
     output$y_valid <- y_test

@@ -20,8 +20,9 @@ BayesCOOP(
 )
 }
 \arguments{
-\item{data_train}{a list of feature_table, sample_metadata and feature_metadata from training
-data (unstandardized). See \emph{IntegratedLearner} for more details.}
+\item{data_train}{training input data as a
+\code{MultiAssayExperiment::MultiAssayExperiment} with at least two assays in
+\code{experiments(data_train)} and response \code{Y} in \code{colData(data_train)}.}
 
 \item{family}{currently supports only Gaussian family. Default: "gaussian".}
 
@@ -73,4 +74,29 @@ fusion to enable integrative learning across multiple data modalities. For uncer
 quantification, BayesCOOP applies the Bayesian bootstrap to generate approximate posterior
 samples by performing maximum a posteriori (MAP) estimation on jittered and resampled
 multimodal datasets. Currently, only continuous outcomes are supported.
+}
+\examples{
+set.seed(1)
+sample_ids <- paste0("S", seq_len(12))
+x1 <- matrix(rnorm(20 * 12), nrow = 20,
+             dimnames = list(paste0("g", seq_len(20)), sample_ids))
+x2 <- matrix(rnorm(15 * 12), nrow = 15,
+             dimnames = list(paste0("p", seq_len(15)), sample_ids))
+y <- rnorm(12)
+
+mae <- MultiAssayExperiment::MultiAssayExperiment(
+  experiments = list(rna = x1, prot = x2),
+  colData = S4Vectors::DataFrame(Y = y, row.names = sample_ids)
+)
+
+fit <- BayesCOOP(
+  data_train = mae,
+  bb = FALSE,
+  control = list(rho = c(0, 0.5)),
+  maxit = 5,
+  warning = FALSE,
+  verbose = FALSE
+)
+fit$rho_MAP
+
 }

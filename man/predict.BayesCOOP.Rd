@@ -17,7 +17,9 @@
 \arguments{
 \item{object}{fitted object returned by the function \code{\link{BayesCOOP}} implemented on the training dataset.}
 
-\item{newdata}{a list of feature_table, sample_metadata and feature_metadata from validation dataset (unstandardized). See \emph{IntegratedLearner} for more details.}
+\item{newdata}{validation input data as a
+\code{MultiAssayExperiment::MultiAssayExperiment} with at least two assays in
+\code{experiments(newdata)} and response \code{Y} in \code{colData(newdata)}.}
 
 \item{family}{currently supports only Gaussian family. Default: "gaussian".}
 

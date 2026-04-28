@@ -7,8 +7,9 @@
 #' samples by performing maximum a posteriori (MAP) estimation on jittered and resampled
 #' multimodal datasets. Currently, only continuous outcomes are supported.
 #'
-#' @param data_train a list of feature_table, sample_metadata and feature_metadata from training
-#' data (unstandardized). See \emph{IntegratedLearner} for more details.
+#' @param data_train training input data as a
+#' \code{MultiAssayExperiment::MultiAssayExperiment} with at least two assays in
+#' \code{experiments(data_train)} and response \code{Y} in \code{colData(data_train)}.
 #' @param family currently supports only Gaussian family. Default: "gaussian".
 #' @param ss a length-2 numeric vector giving the spike/sLab scales c(s0, s1) with s0 < s1.
 #' Default: c(0.05, 1).
@@ -47,6 +48,30 @@
 #' @importFrom stats rnorm rgamma quantile median
 #' @importFrom truncnorm rtruncnorm
 #'
+#' @examples
+#' set.seed(1)
+#' sample_ids <- paste0("S", seq_len(12))
+#' x1 <- matrix(rnorm(20 * 12), nrow = 20,
+#'              dimnames = list(paste0("g", seq_len(20)), sample_ids))
+#' x2 <- matrix(rnorm(15 * 12), nrow = 15,
+#'              dimnames = list(paste0("p", seq_len(15)), sample_ids))
+#' y <- rnorm(12)
+#'
+#' mae <- MultiAssayExperiment::MultiAssayExperiment(
+#'   experiments = list(rna = x1, prot = x2),
+#'   colData = S4Vectors::DataFrame(Y = y, row.names = sample_ids)
+#' )
+#'
+#' fit <- BayesCOOP(
+#'   data_train = mae,
+#'   bb = FALSE,
+#'   control = list(rho = c(0, 0.5)),
+#'   maxit = 5,
+#'   warning = FALSE,
+#'   verbose = FALSE
+#' )
+#' fit$rho_MAP
+#'
 #' @export
 BayesCOOP <- function(data_train, family = "gaussian",
                       ss = c(0.05, 1), group = TRUE,
@@ -54,8 +79,6 @@ BayesCOOP <- function(data_train, family = "gaussian",
                       bbiters = 1100, bbburn = 100, maxit = 100,
                       warning = TRUE, verbose = TRUE, control = list()) {
   # Some basic checks
-  if(length(data_train) != 3 | any(names(data_train) != c("feature_table", "sample_metadata", "feature_metadata")) == TRUE)
-    stop("data_train must be a list of feature_table, sample_metadata and feature_metadata!")
   if(length(ss) != 2 | ss[1] >= ss[2])
     stop("ss must be a two-dimensional vector c(s0, s1) with s0 < s1!")
   if(family != "gaussian")
@@ -69,8 +92,12 @@ BayesCOOP <- function(data_train, family = "gaussian",
   ######################### data pre-processing ###########################
   #########################################################################
   
-  y_train <- gen_datalist(data_train)$y
-  xList_train <- gen_datalist(data_train)$xList
+  parsed_train <- gen_datalist(data_train)
+  y_train <- parsed_train$y
+  xList_train <- parsed_train$xList
+  if (length(xList_train) < 2) {
+    stop("BayesCOOP requires at least two modalities.")
+  }
   
   feature_names <- lapply(xList_train, names)
   
@@ -98,8 +125,8 @@ BayesCOOP <- function(data_train, family = "gaussian",
     beta0 <- runif(sum(pis), min = -5, max = 5)
     picums <- cumsum(pis)
     theta <- vector("list", length(xList_train_std))
-    theta[[1]] <- beta0[1:picums[1]]
-    for(ii in 2:length(xList_train_std)){
+    theta[[1]] <- beta0[seq_len(picums[1])]
+    for(ii in seq.int(2, length(xList_train_std))){
       theta[[ii]] <- beta0[(picums[ii-1]+1):picums[ii]]
     }
     errVar <- 1
@@ -110,12 +137,12 @@ BayesCOOP <- function(data_train, family = "gaussian",
     errVar_samples <- numeric(length = bbiters - bbburn)
     
     start.time <- Sys.time()
-    for(its in 1:bbiters) {
+    for(its in seq_len(bbiters)) {
       
       ###### Update rho ######
       denom <- 0
-      for(i in 1:(length(xList_train_std) -1)) {
-        for(j in (i + 1):length(xList_train_std)) {
+      for(i in seq_len(length(xList_train_std) - 1)) {
+        for(j in seq.int(i + 1, length(xList_train_std))) {
           denom <- denom + sum(drop(as.matrix(xList_train_std[[i]]) %*% theta[[i]] - as.matrix(xList_train_std[[j]]) %*% theta[[j]]) ^ 2) + 1e-5
         }
       }
@@ -140,8 +167,8 @@ BayesCOOP <- function(data_train, family = "gaussian",
       
       beta_new <- fit_bmlasso_bb$coefficients[-1]
       
-      theta[[1]] <- beta_new[1:picums[1]]
-      for(kk in 2:length(xList_train_std)){
+      theta[[1]] <- beta_new[seq_len(picums[1])]
+      for(kk in seq.int(2, length(xList_train_std))){
         theta[[kk]] <- beta_new[(picums[kk-1]+1):picums[kk]]
       }
       

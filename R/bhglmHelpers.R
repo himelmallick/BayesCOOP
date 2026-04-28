@@ -49,8 +49,11 @@ bhglm.Grouping <- function (all.var, group) {
             if (is.null(group)) 
                 group <- c(0, n.vars)
             group <- unique(group)
-            for (j in 1:(length(group) - 1)) group.vars[[j]] <- all.var[(group[j] + 
-                                                                             1):group[j + 1]]
+            if (length(group) > 1) {
+                for (j in seq_len(length(group) - 1)) {
+                    group.vars[[j]] <- all.var[(group[j] + 1):group[j + 1]]
+                }
+            }
         }
     }
     all.group.vars <- unique(unlist(group.vars))
@@ -81,8 +84,11 @@ bhglm.prepare <- function (x, intercept, prior.mean, prior.sd, prior.scale, prio
             x1 <- x1[, c(covars, unlist(group))]
             g <- c(length(ungroup.vars), length(ungroup.vars) + 
                        cumsum(lapply(group, length)))
-            for (j in 1:(length(group) - 1)) group.vars[[j]] <- colnames(x1[, 
-                                                                            (g[j] + 1):g[j + 1]])
+            if (length(group) > 1) {
+                for (j in seq_len(length(group) - 1)) {
+                    group.vars[[j]] <- colnames(x1[, (g[j] + 1):g[j + 1]])
+                }
+            }
             x1 <- as.matrix(x1)
             x <- x1
             if (intercept) {
@@ -106,16 +112,16 @@ bhglm.prepare <- function (x, intercept, prior.mean, prior.sd, prior.scale, prio
     if (length(prior.df) < J) 
         prior.df <- c(prior.df, rep(prior.df[length(prior.df)], 
                                     J - length(prior.df)))
-    prior.mean <- prior.mean[1:J]
-    prior.scale <- prior.scale[1:J]
-    prior.df <- prior.df[1:J]
+    prior.mean <- prior.mean[seq_len(J)]
+    prior.scale <- prior.scale[seq_len(J)]
+    prior.df <- prior.df[seq_len(J)]
     prior.df <- ifelse(prior.df == Inf, 1e+10, prior.df)
     if (is.null(prior.sd)) 
         prior.sd <- prior.scale + 0.2
     if (length(prior.sd) < J) 
         prior.sd <- c(prior.sd, rep(prior.sd[length(prior.sd)], 
                                     J - length(prior.sd)))
-    prior.sd <- prior.sd[1:J]
+    prior.sd <- prior.sd[seq_len(J)]
     sd.x <- apply(x, 2, sd, na.rm = TRUE)
     min.x.sd <- 1e-04
     prior.sd <- ifelse(sd.x < min.x.sd, 1e-04, prior.sd)
@@ -139,10 +145,10 @@ bhglm.update.ptheta.group <- function (group.vars, p, w, b) {
             mean((bb - 1) * log(1 - theta))
     }
     theta <- p
-    for (j in 1:length(group.vars)) {
+    for (j in seq_len(length(group.vars))) {
         vars <- group.vars[[j]]
         theta[vars] <- optimize(f, interval = c(0, 1), w = w[vars], 
-                                p = p[vars], bb = b[j], maximum = T)$maximum
+                                p = p[vars], bb = b[j], maximum = TRUE)$maximum
     }
     theta <- ifelse(theta < 0.01, 0.01, theta)
     theta <- ifelse(theta > 0.99, 0.99, theta)
@@ -152,7 +158,7 @@ bhglm.update.ptheta.group <- function (group.vars, p, w, b) {
 
 bhglm.update.ptheta.network <- function (theta, p, w) {
     phi <- 2
-    for (j in 1:length(theta)) {
+    for (j in seq_len(length(theta))) {
         mu <- w %*% theta
         m <- mu[j] - w[j, j] * theta[j]
         a <- m * phi
@@ -212,14 +218,14 @@ bhglm.covariates <- function (x.con, x.cat, con.rescale = TRUE, cat.center = FAL
         x1 <- as.matrix(x1)
         if (is.null(colnames(x1))) {
             warning("some variables have no names.", call. = FALSE)
-            colnames(x1) <- paste("x.con", 1:ncol(x1), sep = "")
+            colnames(x1) <- paste("x.con", seq_len(ncol(x1)), sep = "")
         }
     }
     if (!is.null(x2)) {
         x2 <- as.matrix(x2)
         if (is.null(colnames(x2))) {
             warning("some variables have no names.", call. = FALSE)
-            colnames(x2) <- paste("x.cat", 1:ncol(x2), sep = "")
+            colnames(x2) <- paste("x.cat", seq_len(ncol(x2)), sep = "")
         }
     }
     x <- cbind(x1, x2)
@@ -232,13 +238,13 @@ bhglm.covariates <- function (x.con, x.cat, con.rescale = TRUE, cat.center = FAL
         d <- which(na.prop > 20/100)
         warning("the following ", length(d), " variables have more than 20% missing values:", 
                 call. = FALSE)
-        for (j in 1:length(d)) warning(names(d)[j], call. = FALSE)
+        for (j in seq_len(length(d))) warning(names(d)[j], call. = FALSE)
     }
     if (!is.null(x1) & con.rescale) 
         x1 <- scale(x1)
     if (!is.null(x2)) {
         X2 <- NULL
-        for (i in 1:ncol(x2)) {
+        for (i in seq_len(ncol(x2))) {
             x <- x.new <- x2[, i]
             x <- as.factor(x)
             f <- ~x - 1
@@ -282,7 +288,7 @@ bhglm.covariates <- function (x.con, x.cat, con.rescale = TRUE, cat.center = FAL
         warning(sum(is.na(x)), " missing values have been filled!", 
                 call. = FALSE)
         if (is.null(ind.group)) {
-            func2 = function(w) {
+            func2 <- function(w) {
                 na.index <- which(is.na(w))
                 w[na.index] <- mean(w, na.rm = TRUE)
                 return(w)
@@ -294,7 +300,7 @@ bhglm.covariates <- function (x.con, x.cat, con.rescale = TRUE, cat.center = FAL
                 group.means <- tapply(w, ind.group, mean, na.rm = TRUE)
                 group.means <- ifelse(is.na(group.means), mean(w, 
                                                                na.rm = TRUE), group.means)
-                for (k in 1:length(group.means)) {
+                for (k in seq_len(length(group.means))) {
                     na.index <- which(is.na(w) & ind.group == names(group.means)[k])
                     w[na.index] <- mean(w[ind.group == names(group.means)[k]], 
                                         na.rm = TRUE)
@@ -349,10 +355,10 @@ bhglm.bmlasso.fit <- function (x, y, family = "gaussian", offset = NULL, epsilon
     names(theta.weights) <- gvars
     if (length(b) < length(group.vars)) 
         b <- c(b, rep(b[length(b)], length(group.vars) - length(b)))
-    b <- b[1:length(group.vars)]
+    b <- b[seq_len(length(group.vars))]
     bb <- b
     if (is.null(init)) {
-        for (k in 1:5) {
+        for (k in seq_len(5)) {
             ps <- ss[1] + (k - 1) * 0.01
             if (family == "cox") 
                 ps <- min(ss[1] + (k - 1) * 0.01, 0.08)
@@ -370,7 +376,7 @@ bhglm.bmlasso.fit <- function (x, y, family = "gaussian", offset = NULL, epsilon
     init <- b
     devold <- 0
     conv <- FALSE
-    for (iter in 1:maxit) {
+    for (iter in seq_len(maxit)) {
         if (alpha == 1) 
             out <- bhglm.update.scale.p(prior = "mde", b0 = b[gvars], 
                                   ss = ss, theta = theta)
@@ -443,7 +449,7 @@ bhglm.bmlasso <- function (x, y, family = c("gaussian", "binomial", "poisson",
     call <- match.call()
     x <- as.matrix(x)
     if (is.null(colnames(x))) 
-        colnames(x) <- paste("x", 1:ncol(x), sep = "")
+        colnames(x) <- paste("x", seq_len(ncol(x)), sep = "")
     nobs <- nrow(x)
     if (NROW(y) != nobs) 
         stop("nobs of 'x' and 'y' are different")
@@ -476,11 +482,9 @@ bhglm.bmlasso <- function (x, y, family = c("gaussian", "binomial", "poisson",
     minutes <- round(difftime(stop.time, start.time, units = "min"), 
                      3)
     if (verbose) {
-        cat("EM Coordinate Decent Iterations:", f$iter, "\n")
-        cat("Computational time:", minutes, "minutes \n")
+        message("EM Coordinate Decent Iterations: ", f$iter)
+        message("Computational time: ", minutes, " minutes")
     }
     return(f)
 }
-
-
 

@@ -4,3 +4,7 @@
 ^README\.html$
 ^README_files$
 ^/README_files$
+^BayesCOOP\.BiocCheck$
+^BayesCOOP\.Rcheck$
+^BayesCOOP_.*\.tar\.gz$
+^vignettes/.*\.html$
