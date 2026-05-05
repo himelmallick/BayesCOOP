@@ -25,7 +25,10 @@ In this tutorial, we work through a complete multimodal regression workflow usin
 
 **BayesCOOP** is a scalable Bayesian framework for supervised multimodal integration with continuous outcomes. It uses group spike-and-slab double exponential shrinkage prior for joint feature/view selection and can optionally run a Bayesian bootstrap for uncertainty. For further details, see our [preprint](https://www.biorxiv.org/content/10.1101/2025.10.23.684056v1).
 
-In this tutorial we: (1) load and preprocess a longitudinal pregnancy multi-omics dataset (immune + proteomics), (2) fit BayesCOOP with and without Bayesian bootstrap, and (3) feature selection sparsity.
+In this tutorial we: (1) load and preprocess a longitudinal pregnancy
+multi-omics dataset (immune + proteomics), (2) fit BayesCOOP with and
+without Bayesian bootstrap, (3) compare against a frequentist cooperative
+learning baseline, and (4) assess feature selection sparsity.
 
 ------------------------------------------------------------------------
 
@@ -37,11 +40,12 @@ We assume **BayesCOOP** is already installed in your R library.
 library(BayesCOOP)
 ```
 
-Now we load the packages we are going to use in the rest of the tutorial: `BayesCOOP` (main method), `MultiAssayExperiment` (multimodal container), `dplyr` (data pre-processing), and `multiview` (Cooperative Learning).
+Now we load the packages used in this tutorial:
+`MultiAssayExperiment` for multimodal data handling and `multiview` for
+frequentist cooperative learning comparison.
 
 ```{r packages}
 library(MultiAssayExperiment)
-library(dplyr)
 library(multiview)
 ```
 
@@ -49,7 +53,9 @@ library(multiview)
 
 # 2. Load the Pregnancy Dataset
 
-We load the pregnancy dataset from the [IntegratedLearner GitHub repository](https://github.com/himelmallick/IntegratedLearner) and convert it to `MultiAssayExperiment` objects for downstream modeling.
+We load the pregnancy dataset from local package data files in
+`inst/ext_data` and convert it to `MultiAssayExperiment` objects for
+downstream modeling.
 
 ```{r load_data}
 list_to_mae <- function(dat, y_col = "Y") {
@@ -88,15 +94,43 @@ list_to_mae <- function(dat, y_col = "Y") {
   )
 }
 
-## Load train data
-data_train_list <- get(load(url(
-  "https://raw.githubusercontent.com/himelmallick/IntegratedLearner/master/data/StelzerDOS.RData"
-)))
+## Load train/test data from inst/ext_data
+data_candidates <- c(
+  system.file("ext_data", package = "BayesCOOP"),
+  file.path("inst", "ext_data"),
+  file.path("..", "inst", "ext_data"),
+  file.path("..", "..", "inst", "ext_data")
+)
 
-## Load test data
-data_test_list <- get(load(url(
-  "https://raw.githubusercontent.com/himelmallick/IntegratedLearner/master/data/StelzerDOS_valid.RData"
-)))
+train_name <- "StelzerDOS.RData"
+test_name <- "StelzerDOS_valid.RData"
+
+data_dir <- ""
+for (cand in data_candidates) {
+  if (identical(cand, "")) {
+    next
+  }
+  train_file_cand <- file.path(cand, train_name)
+  test_file_cand <- file.path(cand, test_name)
+  if (file.exists(train_file_cand) && file.exists(test_file_cand)) {
+    data_dir <- cand
+    break
+  }
+}
+
+if (identical(data_dir, "")) {
+  stop(
+    "Missing required files: ", train_name, " and ", test_name,
+    ". Expected under inst/ext_data (searched: ",
+    paste(data_candidates, collapse = ", "), ")."
+  )
+}
+
+train_file <- file.path(data_dir, train_name)
+test_file <- file.path(data_dir, test_name)
+
+data_train_list <- get(load(train_file))
+data_test_list <- get(load(test_file))
 
 ## Convert to MultiAssayExperiment
 data_train <- list_to_mae(data_train_list)
@@ -107,53 +141,102 @@ data_test <- list_to_mae(data_test_list)
 
 # 3. Preprocessing
 
-We remove metabolomics features since it’s not present in the validation set. Then we consider baseline samples only—training samples labeled with “A” and test samples labeled with “G1”—ensuring that all assays and outcomes stay synchronized across datasets.
+We remove metabolomics features since it is not present in the validation
+set. Then we consider baseline samples only, ensuring that all assays and
+outcomes stay synchronized across datasets. The data stay in MAE format
+throughout.
 
 ```{r preprocess_data}
-## Extract assays from MAE (feature x sample)
-xList_train <- lapply(MultiAssayExperiment::experiments(data_train), as.matrix)
-xList_test <- lapply(MultiAssayExperiment::experiments(data_test), as.matrix)
+## Keep shared assays and remove Metabolomics
+shared_assays <- intersect(
+  names(MultiAssayExperiment::experiments(data_train)),
+  names(MultiAssayExperiment::experiments(data_test))
+)
+shared_assays <- setdiff(shared_assays, "Metabolomics")
 
-## Remove Metabolomics from training assays
-xList_train <- xList_train[names(xList_train) != "Metabolomics"]
-
-## Keep assays present in both train and test
-shared_assays <- intersect(names(xList_train), names(xList_test))
-xList_train <- xList_train[shared_assays]
-xList_test <- xList_test[shared_assays]
-
-## Extract response and sample IDs
-y_train <- as.matrix(SummarizedExperiment::colData(data_train)$Y)
-rownames(y_train) <- rownames(SummarizedExperiment::colData(data_train))
-y_test <- as.matrix(SummarizedExperiment::colData(data_test)$Y)
-rownames(y_test) <- rownames(SummarizedExperiment::colData(data_test))
-
-## Selecting baseline observations from train and test data
-pos_train <- grep("A", colnames(xList_train[[1]]), ignore.case = TRUE)
-pos_test <- grep("G1", colnames(xList_test[[1]]))
-xList_train <- lapply(xList_train, function(foo) foo[, pos_train, drop = FALSE])
-xList_test <- lapply(xList_test, function(foo) foo[, pos_test, drop = FALSE])
-y_train <- y_train[pos_train, , drop = FALSE]
-y_test <- y_test[pos_test, , drop = FALSE]
-
-## Convert to sample x feature data.frames and filter features
-xList_train <- lapply(xList_train, function(foo) as.data.frame(t(foo)))
-xList_test <- lapply(xList_test, function(foo) as.data.frame(t(foo)))
-abd_thresh <- 0; prev_thresh <- 0.1
-xList_train <- lapply(xList_train, function(foo) BayesCOOP:::filter_features(foo, abd_thresh, prev_thresh))
-xList_test <- lapply(xList_test, function(foo) BayesCOOP:::filter_features(foo, abd_thresh, prev_thresh))
-
-## Considering the common features between train and test set
-keep_features <- vector("list", length = length(xList_train))
-for(i in 1:length(keep_features)) {
-  keep_features[[i]] <- intersect(names(xList_train[[i]]), names(xList_test[[i]]))
-  xList_train[[i]] <- as.matrix(xList_train[[i]][, keep_features[[i]], drop = FALSE])
-  xList_test[[i]] <- as.matrix(xList_test[[i]][, keep_features[[i]], drop = FALSE])
+if (length(shared_assays) < 2) {
+  stop("At least two shared assays are required for BayesCOOP.")
 }
 
-# Reconstruct MAE objects expected by BayesCOOP
-data_train_processed <- BayesCOOP:::reconstruct_data(xList_train, y_train)
-data_test_processed <- BayesCOOP:::reconstruct_data(xList_test, y_test)
+data_train <- data_train[, , shared_assays]
+data_test <- data_test[, , shared_assays]
+
+## Harmonize samples within each MAE
+data_train <- MultiAssayExperiment::intersectColumns(data_train)
+data_test <- MultiAssayExperiment::intersectColumns(data_test)
+
+## Keep baseline samples only: train IDs containing 'A', test IDs containing 'G1'
+train_ids <- grep(
+  "A",
+  rownames(MultiAssayExperiment::colData(data_train)),
+  ignore.case = TRUE,
+  value = TRUE
+)
+test_ids <- grep(
+  "G1",
+  rownames(MultiAssayExperiment::colData(data_test)),
+  value = TRUE
+)
+
+data_train <- data_train[, train_ids, ]
+data_test <- data_test[, test_ids, ]
+
+## Filter features assay-wise, then keep common train/test features per assay
+filter_assay <- function(assay_mat, abd_threshold = 0, prev_threshold = 0.1) {
+  assay_df <- as.data.frame(t(assay_mat))
+  assay_df <- BayesCOOP:::filter_features(
+    assay_df,
+    abd_threshold = abd_threshold,
+    prev_threshold = prev_threshold
+  )
+  t(as.matrix(assay_df))
+}
+
+train_assays <- lapply(MultiAssayExperiment::experiments(data_train), as.matrix)
+test_assays <- lapply(MultiAssayExperiment::experiments(data_test), as.matrix)
+
+abd_thresh <- 0
+prev_thresh <- 0.1
+train_assays <- lapply(
+  train_assays,
+  filter_assay,
+  abd_threshold = abd_thresh,
+  prev_threshold = prev_thresh
+)
+test_assays <- lapply(
+  test_assays,
+  filter_assay,
+  abd_threshold = abd_thresh,
+  prev_threshold = prev_thresh
+)
+
+for (assay_name in names(train_assays)) {
+  common_features <- intersect(
+    rownames(train_assays[[assay_name]]),
+    rownames(test_assays[[assay_name]])
+  )
+  train_assays[[assay_name]] <- train_assays[[assay_name]][
+    common_features,
+    ,
+    drop = FALSE
+  ]
+  test_assays[[assay_name]] <- test_assays[[assay_name]][
+    common_features,
+    ,
+    drop = FALSE
+  ]
+}
+
+## Replace assays in MAE objects and keep MAE inputs for BayesCOOP
+data_train_processed <- data_train
+data_test_processed <- data_test
+MultiAssayExperiment::experiments(data_train_processed) <-
+  MultiAssayExperiment::ExperimentList(train_assays)
+MultiAssayExperiment::experiments(data_test_processed) <-
+  MultiAssayExperiment::ExperimentList(test_assays)
+
+data_train_processed <- MultiAssayExperiment::intersectColumns(data_train_processed)
+data_test_processed <- MultiAssayExperiment::intersectColumns(data_test_processed)
 
 ```
 
@@ -168,7 +251,7 @@ Here we fit BayesCOOP using `bb = TRUE` to enable Bayesian bootstrap–based unc
 set.seed(123)
 
 ## Fitting BayesCOOP
-fit_BayesCOOP_bb_true <- BayesCOOP::BayesCOOP(data_train = data_train_processed,
+fit_BayesCOOP_bb_true <- BayesCOOP(data_train = data_train_processed,
   family = "gaussian",
   ss = c(0.05, 1),
   group = TRUE,
@@ -202,7 +285,7 @@ We also run BayesCOOP again with `bb = FALSE` to obtain posterior mode estimates
 set.seed(123)
 
 ## Fitting BayesCOOP with `bb` = FALSE
-fit_BayesCOOP_bb_false <- BayesCOOP::BayesCOOP(
+fit_BayesCOOP_bb_false <- BayesCOOP(
   data_train = data_train_processed,
   family = "gaussian",
   ss = c(0.05, 1),
@@ -228,22 +311,179 @@ print(mspe_BayesCOOP_bb_false)
 ```
 
 
-# 6. Feature Selection / Sparsity Comparison
+# 6. Cooperative Learning Baselines
 
-Finally, we count the number of **selected (nonzero) features** for each method to compare their **sparsity** and **selection aggressiveness**.  
+Next, we construct three Cooperative Learning baselines using the
+`multiview` package: "Early" (\eqn{\rho = 0}), "Intermediate"
+(\eqn{\rho = 0.5}), and "Late" (\eqn{\rho = 1}). We apply identical
+preprocessing steps, cross-validate the regularization parameter, fit the
+models, and record the MSPE and runtime.
+
+```{r cooperative_learning_baselines}
+set.seed(123)
+
+## Constructing the data for multiview implementation
+y_train <- as.numeric(BayesCOOP:::gen_datalist(data_train_processed)$y)
+y_test <- as.numeric(BayesCOOP:::gen_datalist(data_test_processed)$y)
+xList_train <- BayesCOOP:::gen_datalist(data_train_processed)$xList
+xList_test <- BayesCOOP:::gen_datalist(data_test_processed)$xList
+
+## Matrix datatype conversion
+xList_train <- lapply(xList_train, as.matrix)
+xList_test <- lapply(xList_test, as.matrix)
+
+## Choosing lambda using cross validation
+cvfit_alpha <- function(xlist, y, rho, alpha = 1, folds = 5) {
+  cvfit <- multiview::cv.multiview(
+    x_list = xlist,
+    y = y,
+    rho = rho,
+    alpha = alpha,
+    nfolds = folds
+  )
+  list(lambda_min = cvfit$lambda.min)
+}
+
+## Different rho values for choice of fusion schemes
+rhos_to_try <- c("Early" = 0, "Intermediate" = 0.5, "Late" = 1)
+coop_results <- lapply(names(rhos_to_try), function(label) {
+  rho_val <- rhos_to_try[[label]]
+  start_time <- Sys.time()
+  cvres <- cvfit_alpha(xList_train, y_train, rho = rho_val)
+  best_lambda <- cvres$lambda_min
+  fit_mv <- multiview::multiview(
+    xList_train,
+    y_train,
+    lambda = best_lambda,
+    rho = rho_val,
+    alpha = 1
+  )
+  y_pred_mv <- as.numeric(
+    predict(fit_mv, newx = xList_test, s = best_lambda)
+  )
+  mspe_mv <- mean((y_pred_mv - y_test)^2)
+  runtime_min <- round(
+    as.numeric(difftime(Sys.time(), start_time, units = "mins")),
+    3
+  )
+
+  coefs_mv <- coef(fit_mv, s = best_lambda)
+  n_nonzero_mv <- sum(coefs_mv != 0) - 1
+
+  list(
+    method = label,
+    rho = rho_val,
+    mspe = mspe_mv,
+    time_min = runtime_min,
+    n_nonzero = n_nonzero_mv
+  )
+})
+```
+
+# 7. Performance Comparison
+
+We next combine Mean Squared Prediction Error (MSPE) and runtime to assess
+both accuracy and computational efficiency across models. Lower MSPE values
+indicate better predictive performance.
+
+```{r performance_comparison}
+## Performance summary for BayesCOOP with `bb` = TRUE
+BayesCOOP_bb_true_summary <- list(
+  method = "BayesCOOP (bb=TRUE)",
+  mspe = mspe_BayesCOOP_bb_true,
+  time_min = fit_BayesCOOP_bb_true$time
+)
+
+## Performance summary for BayesCOOP with `bb` = FALSE
+BayesCOOP_bb_false_summary <- list(
+  method = "BayesCOOP (bb=FALSE)",
+  mspe = mspe_BayesCOOP_bb_false,
+  time_min = fit_BayesCOOP_bb_false$time
+)
+
+## Performance summary for multiview
+coop_df <- do.call(rbind, lapply(coop_results, function(res)
+  data.frame(
+    method = paste0(
+      "Cooperative Learning (",
+      res$method,
+      ", rho=",
+      res$rho,
+      ")"
+    ),
+    mspe = res$mspe,
+    time_min = res$time_min
+  )
+))
+
+## Table for performance comparison
+perf_table <- rbind(
+  data.frame(
+    method = BayesCOOP_bb_true_summary$method,
+    mspe = BayesCOOP_bb_true_summary$mspe,
+    time_min = BayesCOOP_bb_true_summary$time_min
+  ),
+  data.frame(
+    method = BayesCOOP_bb_false_summary$method,
+    mspe = BayesCOOP_bb_false_summary$mspe,
+    time_min = BayesCOOP_bb_false_summary$time_min
+  ),
+  coop_df
+)
+
+## Print the performance table
+print(perf_table)
+```
+
+# 8. Feature Selection / Sparsity Comparison
+
+Finally, we count the number of selected (nonzero) features for each method
+to compare their sparsity and selection aggressiveness.
 
 ```{r feature_selection_bcoop}
 ## Number of features selected for BayesCOOP with `bb` = TRUE
-n_nz_BayesCOOP_bb_true  <- sum(fit_BayesCOOP_bb_true$beta_postmed!=0)
+n_nz_BayesCOOP_bb_true <- sum(fit_BayesCOOP_bb_true$beta_postmed != 0)
 ## Number of features selected for BayesCOOP with `bb` = FALSE
-n_nz_BayesCOOP_bb_false <- sum(fit_BayesCOOP_bb_false$beta_MAP!=0)
+n_nz_BayesCOOP_bb_false <- sum(fit_BayesCOOP_bb_false$beta_MAP != 0)
+## Number of features selected for multiview
+coop_sparse_df <- do.call(rbind, lapply(coop_results, function(res)
+  data.frame(
+    method = paste0(
+      "Cooperative Learning (",
+      res$method,
+      ", rho=",
+      res$rho,
+      ")"
+    ),
+    n_selected_feat = res$n_nonzero
+  )
+))
+
+sparsity_table <- rbind(
+  data.frame(
+    method = "BayesCOOP (bb=TRUE)",
+    n_selected_feat = n_nz_BayesCOOP_bb_true
+  ),
+  data.frame(
+    method = "BayesCOOP (bb=FALSE)",
+    n_selected_feat = n_nz_BayesCOOP_bb_false
+  ),
+  coop_sparse_df
+)
+
+## Print table comparing the number of selected features for different methods
+sparsity_table
 ```
 
-For this particular dataset, both BayesCOOP variants achieved lower MSPE compared to their frequentist counterparts, with the Bayesian Bootstrap version producing a more parsimonious model. For an in-depth biological interpretation of the feature selection results, please check out our [preprint](https://www.biorxiv.org/content/10.1101/2025.10.23.684056v1).
+For this particular dataset, both BayesCOOP variants achieved lower MSPE
+compared to their frequentist counterparts, with the Bayesian Bootstrap
+version producing a more parsimonious model. For an in-depth biological
+interpretation of the feature selection results, please check out our
+[preprint](https://www.biorxiv.org/content/10.1101/2025.10.23.684056v1).
 
 ------------------------------------------------------------------------
 
-# 7. Citation
+# 9. Citation
 
 If you use **BayesCOOP** in your work, please cite:
 
@@ -253,7 +493,7 @@ If you use **BayesCOOP** in your work, please cite:
 
 ------------------------------------------------------------------------
 
-# 8. Session Info
+# 10. Session Info
 
 ```{r sessioninfo}
 sessionInfo()
