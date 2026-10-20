@@ -17,6 +17,7 @@
 #' @param bb logical. If TRUE, run full Bayesian bootstrap inference; if FALSE, run MAP
 #' estimation over a user-supplied rho grid in \code{control}. Default: TRUE.
 #' @param alpha_dirich Dirichlet concentration for Bayesian bootstrap weights. Default: 1.
+#' @param a_rho,b_rho shape parameters of the Beta(a_rho, b_rho) prior on \eqn{\rho}.
 #' @param bbiters number of Bayesian bootstrap iterations. Default: 1100.
 #' @param bbburn number of burn-in iterations discarded from the bootstrap. Default: 100.
 #' @param maxit maximum EM iterations in the inner optimizer. Default: 100.
@@ -44,13 +45,13 @@
 #' @importFrom glmnet glmnet
 #' @importFrom MCMCpack rdirichlet
 #' @importFrom rmutil rlaplace
-#' @importFrom stats rnorm rgamma quantile median
+#' @importFrom stats rnorm rgamma quantile median runif rbeta pbeta qbeta
 #' @importFrom truncnorm rtruncnorm
 #'
 #' @export
 BayesCOOP <- function(data_train, family = "gaussian",
                       ss = c(0.05, 1), group = TRUE,
-                      bb = TRUE, alpha_dirich = 1,
+                      bb = TRUE, alpha_dirich = 1, a_rho = 1, b_rho = 1,
                       bbiters = 1100, bbburn = 100, maxit = 100,
                       warning = TRUE, verbose = TRUE, control = list()) {
   # Some basic checks
@@ -119,7 +120,8 @@ BayesCOOP <- function(data_train, family = "gaussian",
           denom <- denom + sum(drop(as.matrix(xList_train_std[[i]]) %*% theta[[i]] - as.matrix(xList_train_std[[j]]) %*% theta[[j]]) ^ 2) + 1e-5
         }
       }
-      rho <- (truncnorm::rtruncnorm(1, a = 0, b = 1, mean = 0, sd = sqrt(errVar / denom))) ^ 2
+      # rho <- (truncnorm::rtruncnorm(1, a = 0, b = 1, mean = 0, sd = sqrt(errVar / denom))) ^ 2
+      rho <- draw_rho(rho, D = denom, sigma2 = errVar, a = a_rho, b = b_rho)
       
       ## Augmented data for training set using updated rho
       dataAug_train <- data.Augment(y_train, xList_train_std, rho)

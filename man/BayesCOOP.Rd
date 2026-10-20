@@ -11,6 +11,8 @@ BayesCOOP(
   group = TRUE,
   bb = TRUE,
   alpha_dirich = 1,
+  a_rho = 1,
+  b_rho = 1,
   bbiters = 1100,
   bbburn = 100,
   maxit = 100,
@@ -35,6 +37,8 @@ spike-and-slab prior. If FALSE, no grouping is used. Default: TRUE.}
 estimation over a user-supplied rho grid in \code{control}. Default: TRUE.}
 
 \item{alpha_dirich}{Dirichlet concentration for Bayesian bootstrap weights. Default: 1.}
+
+\item{a_rho, b_rho}{shape parameters of the Beta(a_rho, b_rho) prior on \eqn{\rho}.}
 
 \item{bbiters}{number of Bayesian bootstrap iterations. Default: 1100.}
 

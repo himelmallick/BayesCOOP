@@ -31,5 +31,4 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 Imports: caret, dplyr, glmnet, MCMCpack, rmutil, survival, truncnorm, utils
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.3
-
+Config/roxygen2/version: 8.1.0
