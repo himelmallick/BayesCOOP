@@ -408,3 +408,12 @@ bmlasso_cv = function(y, xList,
 
     return(list(beta_hat_bmlasso = beta_hat_bmlasso, rho_bmlasso = rho_bmlasso))
 }
+
+# slice sampler to draw rho parameter
+draw_rho <- function(rho, D, sigma2, a = 0.5, b = 1) {
+  c <- D / (2 * sigma2)
+  if (c <= 0) return(rbeta(1, a, b))
+  upper <- min(1, rho - log(runif(1)) / c)
+  lp <- pbeta(upper, a, b, log.p = TRUE)
+  qbeta(log(runif(1)) + lp, a, b, log.p = TRUE)
+}
