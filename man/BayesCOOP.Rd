@@ -28,13 +28,15 @@ data (unstandardized). See \emph{IntegratedLearner} for more details.}
 \item{family}{currently supports only Gaussian family. Default: "gaussian".}
 
 \item{ss}{a length-2 numeric vector giving the spike/sLab scales c(s0, s1) with s0 < s1.
-Default: c(0.05, 1).}
+Default: c(0.05, 1). Used only when \code{bb = TRUE}.}
 
 \item{group}{logical. If TRUE, predictors are grouped by modality and given a group
-spike-and-slab prior. If FALSE, no grouping is used. Default: TRUE.}
+spike-and-slab prior. If FALSE, no grouping is used. Default: TRUE.
+Used only when \code{bb = TRUE}.}
 
 \item{bb}{logical. If TRUE, run full Bayesian bootstrap inference; if FALSE, run MAP
-estimation over a user-supplied rho grid in \code{control}. Default: TRUE.}
+estimation using multiview cross-validation with alpha and rho supplied in
+\code{control}. Default: TRUE.}
 
 \item{alpha_dirich}{Dirichlet concentration for Bayesian bootstrap weights. Default: 1.}
 
@@ -50,8 +52,14 @@ estimation over a user-supplied rho grid in \code{control}. Default: TRUE.}
 
 \item{verbose}{logical. If TRUE, print iteration counts and runtime. Default: TRUE.}
 
-\item{control}{a named list with element \code{rho}, giving one or more candidate rho values
-to try when \code{bb = FALSE}.}
+\item{control}{MAP-only cross-validation options. Required element \code{rho}
+and optional \code{alpha} (default 1) supply fixed values or candidate grids.
+Lambda is generated automatically and selected by K-fold CV. Optional elements:
+\code{lambda} (explicit lambda grid), \code{s} (\code{"lambda.1se"}, default,
+or \code{"lambda.min"}), \code{nfolds} (default 10, capped at sample size),
+\code{foldid}, \code{seed}, and \code{keep} (retain out-of-fold predictions).
+The selected model is refitted on all training observations using the
+multiview elastic-net penalty; \code{ss} and \code{group} do not apply.}
 }
 \value{
 If \code{bb = TRUE}, a list with:
@@ -66,7 +74,12 @@ If \code{bb = TRUE}, a list with:
 
 If \code{bb = FALSE}, a list with:
 \item{beta_MAP}{MAP estimate of regression coefficients}
-\item{rho_MAP}{selected \eqn{\rho} (minimizing MSPE over \code{control$rho})}
+\item{rho_MAP}{selected agreement parameter from K-fold cross-validation}
+\item{alpha_MAP}{selected elastic-net mixing parameter}
+\item{lambda_MAP}{selected regularization parameter}
+\item{intercept_MAP}{intercept of the full-data multiview refit}
+\item{multiview_fit}{full-data fitted multiview model, used for MAP predictions}
+\item{cv_MAP}{cross-validation scores, folds, and tuning results}
 \item{time}{runtime in minutes}
 \item{feature_names}{list of feature names in the training dataset}
 }

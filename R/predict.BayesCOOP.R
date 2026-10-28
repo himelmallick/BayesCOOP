@@ -72,7 +72,15 @@ predict.BayesCOOP <- function(object, newdata,
   } else {
     message("Prediction using MAP estimator...")
     
-    ## Augmented test data
+    if (!is.null(object$multiview_fit)) {
+      output$y_pred <- as.numeric(stats::predict(
+        object$multiview_fit, newx = lapply(xList_test, as.matrix),
+        s = object$lambda_MAP, type = "response"))
+      output$y_valid <- y_test
+      return(output)
+    }
+
+    ## Augmented test data (compatibility with older MAP objects)
     dataAug_test <- data.Augment(y = NULL, xList_test_std, object$rho_MAP)
     x_aug_test <- as.matrix(dataAug_test$x_aug)
     y_aug_hat <- x_aug_test %*% object$beta_MAP

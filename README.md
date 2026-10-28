@@ -62,18 +62,29 @@ When `bb = TRUE` (the default Bayesian mode), the returned object includes:
 - `time`: runtime in minutes
 - `feature_names`: list of feature names in the dataset
 
-When `bb = FALSE`, BayesCOOP runs fast MAP estimation instead of the Bayesian bootstrap. In that case you must pass `control = list(rho = c(...))`, e.g.:
+When `bb = FALSE`, BayesCOOP runs fast MAP estimation instead of the Bayesian bootstrap. Supply fixed `alpha` and `rho` values (or vectors of candidates) through `control`. Supply a `lambda` grid as well, or omit it to generate lambda paths automatically for each alpha/rho combination. K-fold cross-validation selects the tuning parameters, followed by a refit on all training data. There is no separate 70/30 holdout split. For example:
 
 ```r
 fit_map <- BayesCOOP::BayesCOOP(
-  data_train, ss = c(0.05, 1), group = TRUE,
-  bb = FALSE, maxit = 100,
-  control = list(rho = c(0, 0.5, 1))  # candidate cross-view agreement values
+  data_train, bb = FALSE,
+  control = list(
+    rho = c(0, 0.5, 1),
+    alpha = c(0.5, 0.75, 1),
+    lambda = c(1, 0.1, 0.01),  # omit for automatically generated lambda paths
+    nfolds = 5,
+    s = "lambda.min",
+    seed = 123
+  )
 )
 
-fit_map$rho_MAP  # selected agreement parameter
-fit_map$beta_MAP # MAP coefficients
+fit_map$rho_MAP    # selected agreement parameter
+fit_map$alpha_MAP  # elastic-net mixing parameter
+fit_map$lambda_MAP # regularization parameter selected by CV
+fit_map$beta_MAP   # MAP coefficients
 ```
+
+MAP mode uses the `multiview` elastic-net fit; `ss` and `group` apply only to Bayesian bootstrap mode. The example uses `s = "lambda.min"` to choose the minimum CV error. Omit `s` or use `s = "lambda.1se"` for the default one-standard-error rule. All alpha/rho combinations use the same CV folds. `control$foldid` can supply shared CV folds, and `fit_map$cv_MAP` contains the tuning results. MAP predictions use the fitted training model, including its intercept and scaling.
+
 
 ---
 

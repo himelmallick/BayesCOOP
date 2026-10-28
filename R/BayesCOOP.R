@@ -11,11 +11,13 @@
 #' data (unstandardized). See \emph{IntegratedLearner} for more details.
 #' @param family currently supports only Gaussian family. Default: "gaussian".
 #' @param ss a length-2 numeric vector giving the spike/sLab scales c(s0, s1) with s0 < s1.
-#' Default: c(0.05, 1).
+#' Default: c(0.05, 1). Used only when \code{bb = TRUE}.
 #' @param group logical. If TRUE, predictors are grouped by modality and given a group
 #' spike-and-slab prior. If FALSE, no grouping is used. Default: TRUE.
+#' Used only when \code{bb = TRUE}.
 #' @param bb logical. If TRUE, run full Bayesian bootstrap inference; if FALSE, run MAP
-#' estimation over a user-supplied rho grid in \code{control}. Default: TRUE.
+#' estimation using multiview cross-validation with alpha and rho supplied in
+#' \code{control}. Default: TRUE.
 #' @param alpha_dirich Dirichlet concentration for Bayesian bootstrap weights. Default: 1.
 #' @param a_rho,b_rho shape parameters of the Beta(a_rho, b_rho) prior on \eqn{\rho}.
 #' @param bbiters number of Bayesian bootstrap iterations. Default: 1100.
@@ -23,8 +25,14 @@
 #' @param maxit maximum EM iterations in the inner optimizer. Default: 100.
 #' @param warning logical. If TRUE, emit non-convergence warnings. Default: TRUE.
 #' @param verbose logical. If TRUE, print iteration counts and runtime. Default: TRUE.
-#' @param control a named list with element \code{rho}, giving one or more candidate rho values
-#' to try when \code{bb = FALSE}.
+#' @param control MAP-only cross-validation options. Required element \code{rho}
+#' and optional \code{alpha} (default 1) supply fixed values or candidate grids.
+#' Lambda is generated automatically and selected by K-fold CV. Optional elements:
+#' \code{lambda} (explicit lambda grid), \code{s} (\code{"lambda.1se"}, default,
+#' or \code{"lambda.min"}), \code{nfolds} (default 10, capped at sample size),
+#' \code{foldid}, \code{seed}, and \code{keep} (retain out-of-fold predictions).
+#' The selected model is refitted on all training observations using the
+#' multiview elastic-net penalty; \code{ss} and \code{group} do not apply.
 #'
 #' @return If \code{bb = TRUE}, a list with:
 #' \item{beta_samples}{posterior draws of regression coefficients}
@@ -38,7 +46,12 @@
 #'
 #' If \code{bb = FALSE}, a list with:
 #' \item{beta_MAP}{MAP estimate of regression coefficients}
-#' \item{rho_MAP}{selected \eqn{\rho} (minimizing MSPE over \code{control$rho})}
+#' \item{rho_MAP}{selected agreement parameter from K-fold cross-validation}
+#' \item{alpha_MAP}{selected elastic-net mixing parameter}
+#' \item{lambda_MAP}{selected regularization parameter}
+#' \item{intercept_MAP}{intercept of the full-data multiview refit}
+#' \item{multiview_fit}{full-data fitted multiview model, used for MAP predictions}
+#' \item{cv_MAP}{cross-validation scores, folds, and tuning results}
 #' \item{time}{runtime in minutes}
 #' \item{feature_names}{list of feature names in the training dataset}
 #'
@@ -187,23 +200,34 @@ BayesCOOP <- function(data_train, family = "gaussian",
       stop("At least one non-null value of rho is needed for MAP estimation!")
     }
     
-    rho_grid <- control$rho
     message("Implementing MAP estimation...")
     
     start.time <- Sys.time()
-    fit <- bmlasso_cv(y = y_train, xList = xList_train_std,
-                      rho_grid = rho_grid, group = group, ss = ss, family = family,
-                      maxit = maxit, warning = warning, verbose = verbose)
+    cv_control <- control
+    if (is.null(cv_control$alpha)) cv_control$alpha <- 1
+    allowed <- c("alpha", "rho", "lambda", "s", "nfolds", "foldid", "keep", "seed")
+    unknown <- setdiff(names(cv_control), allowed)
+    if (length(unknown)) stop("Unknown MAP control option(s): ", paste(unknown, collapse = ", "))
+    fit <- do.call(cvar.multiview,
+                   c(list(x.list = xList_train,
+                          y = gen_datalist(data_train)$y,
+                          verbose = verbose), cv_control))
     stop.time <- Sys.time()
     
     # Estimated beta and rho
-    betahat_MAP <- fit$beta_hat_bmlasso
-    rho_MAP <- fit$rho_bmlasso
+    coefficients <- as.numeric(stats::coef(fit$multiview.fit, s = fit$lambda.choice))
+    betahat_MAP <- coefficients[-1L]
+    rho_MAP <- fit$rho.choice
     time <- as.numeric(round(difftime(stop.time, start.time, units="min"), 3), units = "mins")
     
     output$beta_MAP <- betahat_MAP
     names(output$beta_MAP) <- unlist(feature_names)
     output$rho_MAP <- rho_MAP
+    output$alpha_MAP <- fit$alpha.choice
+    output$lambda_MAP <- fit$lambda.choice
+    output$intercept_MAP <- coefficients[1L]
+    output$multiview_fit <- fit$multiview.fit
+    output$cv_MAP <- fit
     output$time <- time
     output$feature_names <- feature_names
     

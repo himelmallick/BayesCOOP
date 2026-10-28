@@ -29,6 +29,6 @@ Description: BayesCOOP implements Bayesian cooperative learning for multimodal
     additional outcome types planned for future releases.
 License: MIT + file LICENSE
 Encoding: UTF-8
-Imports: caret, dplyr, glmnet, MCMCpack, rmutil, survival, truncnorm, utils
+Imports: caret, dplyr, glmnet, multiview, MCMCpack, rmutil, survival, truncnorm, utils
 Roxygen: list(markdown = TRUE)
 Config/roxygen2/version: 8.1.0
