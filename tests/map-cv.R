@@ -12,64 +12,76 @@ data <- list(
   feature_metadata = data.frame(featureID = unlist(lapply(x, colnames)),
                                 featureType = rep(c("a", "b"), c(3, 2))))
 foldid <- rep(1:3, times = c(9, 12, 15))
-fit <- BayesCOOP(data, bb = FALSE, verbose = FALSE,
-                 control = list(alpha = c(0.5, 1), rho = c(0, 0.5),
-                                foldid = foldid, s = "lambda.min", keep = TRUE))
+rho_grid <- c(0, 0.5)
+fit <- BayesCOOP(data, bb = FALSE, verbose = FALSE, warning = FALSE,
+                 control = list(alpha = 0.5, rho = rho_grid, foldid = foldid))
 cv <- fit$cv_MAP
-stopifnot(nrow(cv$alpha.rho.grid) == 4L,
-          fit$alpha_MAP %in% c(0.5, 1), fit$rho_MAP %in% c(0, 0.5),
-          identical(cv$foldid, as.integer(foldid)),
+stopifnot(nrow(cv$cv.table) == 2L, fit$rho_MAP %in% rho_grid, fit$alpha_MAP == 0.5,
+          identical(cv$foldid, as.integer(foldid)), cv$nfolds == 3L,
           length(fit$beta_MAP) == 5L,
           identical(names(fit$beta_MAP), unname(unlist(lapply(x, colnames)))))
-# Reproduce held-out scores independently for every alpha/rho combination.
-for (result in cv$combo.results) {
-  manual <- matrix(NA_real_, length(result$lambda), 3)
-  for (f in 1:3) {
-    test <- foldid == f
-    fold_fit <- multiview::multiview(
-      lapply(x, function(z) z[!test, , drop = FALSE]), y[!test],
-      family = gaussian(), alpha = result$alpha, rho = result$rho,
-      lambda = result$lambda)
-    pred <- predict(fold_fit, newx = lapply(x, function(z) z[test, , drop = FALSE]),
-                    s = result$lambda, type = "response")
-    manual[, f] <- colMeans((y[test] - pred)^2)
-  }
-  stopifnot(isTRUE(all.equal(manual, result$cvm)),
-            result$lambda.min == result$lambda[which.min(apply(manual, 1, weighted.mean, w = tabulate(foldid)))])
+
+# Reproduce every held-out score with the package's own building blocks:
+# standardize on the fold's training rows, augment, fit bmlasso, predict.
+bmlasso <- getFromNamespace("bhglm.bmlasso", "BayesCOOP")
+augment <- getFromNamespace("data.Augment", "BayesCOOP")
+fit_manual <- function(xs, yy, rho) {
+  mu <- lapply(xs, colMeans)
+  sdv <- lapply(xs, function(z) apply(z, 2, sd))
+  xstd <- Map(function(z, m, s) as.data.frame(sweep(sweep(z, 2, m), 2, s, "/")), xs, mu, sdv)
+  aug <- augment(yy - mean(yy), xstd, rho)
+  xa <- data.matrix(aug$x_aug)
+  colnames(xa) <- unlist(lapply(xs, colnames))
+  f <- bmlasso(x = xa, y = as.numeric(aug$y_aug), family = "gaussian", maxit = 100,
+               alpha = 0.5, ss = c(0.05, 1), group = unname(lapply(xs, colnames)),
+               warning = FALSE, verbose = FALSE)
+  list(beta = as.numeric(f$coefficients[-1]), mu = mu, sdv = sdv, ym = mean(yy))
 }
-stopifnot(isTRUE(all.equal(cv$cvm, colMeans((y - cv$fit.preval)^2))))
-# Final model must use all observations at the selected settings.
-refit <- multiview::multiview(x, y, family = gaussian(), alpha = fit$alpha_MAP,
-                             rho = fit$rho_MAP, lambda = fit$lambda_MAP)
-stopifnot(isTRUE(all.equal(as.numeric(coef(refit))[-1], unname(fit$beta_MAP))))
+pred_manual <- function(f, xs) {
+  as.numeric(do.call(cbind, Map(function(z, m, s) sweep(sweep(z, 2, m), 2, s, "/"),
+                                xs, f$mu, f$sdv)) %*% f$beta) + f$ym
+}
+for (i in seq_along(rho_grid)) {
+  manual <- vapply(1:3, function(k) {
+    test <- foldid == k
+    f <- fit_manual(lapply(x, function(z) z[!test, , drop = FALSE]), y[!test], rho_grid[i])
+    mean((y[test] - pred_manual(f, lapply(x, function(z) z[test, , drop = FALSE])))^2)
+  }, numeric(1))
+  stopifnot(isTRUE(all.equal(manual, unname(cv$cvm.folds[i, ]))),
+            isTRUE(all.equal(weighted.mean(manual, tabulate(foldid)), cv$cv.table$cvm[i])))
+}
+stopifnot(fit$rho_MAP == cv$cv.table$rho[which.min(cv$cv.table$cvm)])
+
+# Final model must use all observations at the selected rho.
+refit <- fit_manual(x, y, fit$rho_MAP)
+stopifnot(isTRUE(all.equal(refit$beta, unname(fit$beta_MAP))))
+
 # MAP predictions must not depend on held-out outcomes or held-out scaling.
 pred <- predict(fit, data, bb = FALSE)$y_pred
 changed <- data
 changed$sample_metadata$Y <- y + 100
 stopifnot(isTRUE(all.equal(pred, predict(fit, changed, bb = FALSE)$y_pred)),
-          isTRUE(all.equal(pred, as.numeric(predict(refit, newx = x)))),
-          isTRUE(all.equal(pred, as.numeric(fit$intercept_MAP +
-                                           do.call(cbind, x) %*% fit$beta_MAP))))
+          isTRUE(all.equal(pred, pred_manual(refit, x))))
 one <- lapply(data, identity)
 one$feature_table <- one$feature_table[, 1, drop = FALSE]
 one$sample_metadata <- one$sample_metadata[1, , drop = FALSE]
 stopifnot(isTRUE(all.equal(predict(fit, one, bb = FALSE)$y_pred, pred[1])))
-# Fixed alpha/rho, automatic lambda, 1se selection, and local reproducible seed.
-args <- list(alpha = 0.7, rho = 0.25, nfolds = 3, seed = 42)
+
+# Local reproducible seed: same folds and fit, global RNG left untouched.
+args <- list(alpha = 1, rho = 0.25, nfolds = 3, seed = 42)
 rng <- .Random.seed
-fixed <- BayesCOOP(data, bb = FALSE, verbose = FALSE, control = args)
-stopifnot(identical(rng, .Random.seed), fixed$alpha_MAP == 0.7,
-          fixed$rho_MAP == 0.25, fixed$lambda_MAP == fixed$cv_MAP$lambda.1se,
-          fixed$cv_MAP$lambda.1se >= fixed$cv_MAP$lambda.min)
-again <- BayesCOOP(data, bb = FALSE, verbose = FALSE, control = args)
+fixed <- BayesCOOP(data, bb = FALSE, verbose = FALSE, warning = FALSE, control = args)
+stopifnot(identical(rng, .Random.seed), fixed$alpha_MAP == 1, fixed$rho_MAP == 0.25)
+again <- BayesCOOP(data, bb = FALSE, verbose = FALSE, warning = FALSE, control = args)
 stopifnot(identical(fixed$cv_MAP$foldid, again$cv_MAP$foldid),
           identical(fixed$beta_MAP, again$beta_MAP))
-# Explicit lambda grid and invalid control inputs.
-explicit <- BayesCOOP(data, bb = FALSE, verbose = FALSE,
-                      control = list(rho = 0.5, lambda = c(1, 0.1, 0.01), foldid = foldid))
-stopifnot(explicit$lambda_MAP %in% c(1, 0.1, 0.01))
+
+# Invalid control inputs, including the removed lambda/s options.
 for (bad in list(list(), list(rho = -1), list(rho = 0, alpha = 2),
-                 list(rho = 0, foldid = rep(1, n)), list(rho = 0, nfolds = 1))) {
+                 list(rho = 0, alpha = c(0.5, 1)),
+                 list(rho = 0, foldid = rep(1, n)), list(rho = 0, nfolds = 1),
+                 list(rho = 0, lambda = 0.1), list(rho = 0, s = "lambda.min"))) {
   stopifnot(inherits(try(BayesCOOP(data, bb = FALSE, verbose = FALSE,
                                   control = bad), silent = TRUE), "try-error"))
 }
+cat("map-cv: all checks passed\n")

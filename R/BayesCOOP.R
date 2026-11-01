@@ -11,13 +11,12 @@
 #' data (unstandardized). See \emph{IntegratedLearner} for more details.
 #' @param family currently supports only Gaussian family. Default: "gaussian".
 #' @param ss a length-2 numeric vector giving the spike/sLab scales c(s0, s1) with s0 < s1.
-#' Default: c(0.05, 1). Used only when \code{bb = TRUE}.
+#' Default: c(0.05, 1).
 #' @param group logical. If TRUE, predictors are grouped by modality and given a group
 #' spike-and-slab prior. If FALSE, no grouping is used. Default: TRUE.
-#' Used only when \code{bb = TRUE}.
 #' @param bb logical. If TRUE, run full Bayesian bootstrap inference; if FALSE, run MAP
-#' estimation using multiview cross-validation with alpha and rho supplied in
-#' \code{control}. Default: TRUE.
+#' estimation of the same spike-and-slab model, with \eqn{\rho} chosen by K-fold
+#' cross-validation over the values in \code{control$rho}. Default: TRUE.
 #' @param alpha_dirich Dirichlet concentration for Bayesian bootstrap weights. Default: 1.
 #' @param a_rho,b_rho shape parameters of the Beta(a_rho, b_rho) prior on \eqn{\rho}.
 #' @param bbiters number of Bayesian bootstrap iterations. Default: 1100.
@@ -25,14 +24,18 @@
 #' @param maxit maximum EM iterations in the inner optimizer. Default: 100.
 #' @param warning logical. If TRUE, emit non-convergence warnings. Default: TRUE.
 #' @param verbose logical. If TRUE, print iteration counts and runtime. Default: TRUE.
-#' @param control MAP-only cross-validation options. Required element \code{rho}
-#' and optional \code{alpha} (default 1) supply fixed values or candidate grids.
-#' Lambda is generated automatically and selected by K-fold CV. Optional elements:
-#' \code{lambda} (explicit lambda grid), \code{s} (\code{"lambda.1se"}, default,
-#' or \code{"lambda.min"}), \code{nfolds} (default 10, capped at sample size),
-#' \code{foldid}, \code{seed}, and \code{keep} (retain out-of-fold predictions).
-#' The selected model is refitted on all training observations using the
-#' multiview elastic-net penalty; \code{ss} and \code{group} do not apply.
+#' @param control MAP-only options (\code{bb = FALSE}). Required element
+#' \code{rho}: one or more candidate values of the agreement parameter. Optional:
+#' \code{alpha} (single value in [0, 1], default 1; 1 gives the spike-and-slab
+#' lasso prior used by the bootstrap, other values the elastic-net version),
+#' \code{nfolds} (default 10, capped at the sample size), \code{foldid}
+#' (user-supplied folds) and \code{seed} (local seed for the folds). For every
+#' candidate \eqn{\rho} the model is fitted on K - 1 folds and scored on the
+#' held-out fold; the \eqn{\rho} with the lowest mean CV error (weighted by fold
+#' size) is selected and the model is refitted on all training observations.
+#' There is no \eqn{\lambda} to tune: the penalty comes from the spike/slab scales
+#' \code{ss}. Predictors are standardized, and the response centred, using only
+#' the observations being fitted.
 #'
 #' @return If \code{bb = TRUE}, a list with:
 #' \item{beta_samples}{posterior draws of regression coefficients}
@@ -45,13 +48,13 @@
 #' \item{feature_names}{list of feature names in the training dataset}
 #'
 #' If \code{bb = FALSE}, a list with:
-#' \item{beta_MAP}{MAP estimate of regression coefficients}
-#' \item{rho_MAP}{selected agreement parameter from K-fold cross-validation}
-#' \item{alpha_MAP}{selected elastic-net mixing parameter}
-#' \item{lambda_MAP}{selected regularization parameter}
-#' \item{intercept_MAP}{intercept of the full-data multiview refit}
-#' \item{multiview_fit}{full-data fitted multiview model, used for MAP predictions}
-#' \item{cv_MAP}{cross-validation scores, folds, and tuning results}
+#' \item{beta_MAP}{MAP estimate of the regression coefficients (standardized scale)}
+#' \item{rho_MAP}{agreement parameter selected by K-fold cross-validation}
+#' \item{alpha_MAP}{elastic-net mixing parameter used}
+#' \item{x_center, x_scale}{training means and SDs of the predictors, per view}
+#' \item{y_mean}{training mean of the response}
+#' \item{cv_MAP}{CV results: \code{cv.table} (mean and SE of the CV error per
+#' \eqn{\rho}), per-fold errors, \code{foldid} and \code{nfolds}}
 #' \item{time}{runtime in minutes}
 #' \item{feature_names}{list of feature names in the training dataset}
 #'
@@ -201,38 +204,47 @@ BayesCOOP <- function(data_train, family = "gaussian",
     }
     
     message("Implementing MAP estimation...")
-    
+
     start.time <- Sys.time()
     cv_control <- control
-    if (is.null(cv_control$alpha)) cv_control$alpha <- 1
-    allowed <- c("alpha", "rho", "lambda", "s", "nfolds", "foldid", "keep", "seed")
+    allowed <- c("alpha", "rho", "nfolds", "foldid", "seed")
     unknown <- setdiff(names(cv_control), allowed)
-    if (length(unknown)) stop("Unknown MAP control option(s): ", paste(unknown, collapse = ", "))
-    fit <- do.call(cvar.multiview,
-                   c(list(x.list = xList_train,
-                          y = gen_datalist(data_train)$y,
-                          verbose = verbose), cv_control))
+    if (length(unknown)) {
+      stop("Unknown MAP control option(s): ", paste(unknown, collapse = ", "),
+           ". MAP tunes rho only (no lambda); allowed: ", paste(allowed, collapse = ", "), ".")
+    }
+    fit <- bmlasso_map_cv(
+      x.list = xList_train,
+      y = gen_datalist(data_train)$y,
+      rho = cv_control$rho,
+      alpha = if (is.null(cv_control$alpha)) 1 else cv_control$alpha,
+      nfolds = if (is.null(cv_control$nfolds)) 10 else cv_control$nfolds,
+      foldid = cv_control$foldid,
+      seed = cv_control$seed,
+      ss = ss,
+      group = !is.null(group),
+      family = family,
+      maxit = maxit,
+      warning = warning,
+      verbose = verbose
+    )
     stop.time <- Sys.time()
-    
-    # Estimated beta and rho
-    coefficients <- as.numeric(stats::coef(fit$multiview.fit, s = fit$lambda.choice))
-    betahat_MAP <- coefficients[-1L]
-    rho_MAP <- fit$rho.choice
     time <- as.numeric(round(difftime(stop.time, start.time, units="min"), 3), units = "mins")
-    
-    output$beta_MAP <- betahat_MAP
+
+    output$beta_MAP <- fit$beta
     names(output$beta_MAP) <- unlist(feature_names)
-    output$rho_MAP <- rho_MAP
-    output$alpha_MAP <- fit$alpha.choice
-    output$lambda_MAP <- fit$lambda.choice
-    output$intercept_MAP <- coefficients[1L]
-    output$multiview_fit <- fit$multiview.fit
-    output$cv_MAP <- fit
+    output$rho_MAP <- fit$rho.choice
+    output$alpha_MAP <- fit$alpha
+    output$x_center <- fit$x.center
+    output$x_scale <- fit$x.scale
+    output$y_mean <- fit$y.mean
+    output$cv_MAP <- list(cv.table = fit$cv.table, cvm.folds = fit$cvm.folds,
+                          foldid = fit$foldid, nfolds = fit$nfolds)
     output$time <- time
     output$feature_names <- feature_names
-    
+
   }
-    
+
   #########################################################################
   ################################ Return #################################
   #########################################################################

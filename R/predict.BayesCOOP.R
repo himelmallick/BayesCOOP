@@ -5,7 +5,7 @@
 #' @param object fitted object returned by the function \code{\link{BayesCOOP}} implemented on the training dataset.
 #' @param newdata a list of feature_table, sample_metadata and feature_metadata from validation dataset (unstandardized). See \emph{IntegratedLearner} for more details.
 #' @param family currently supports only Gaussian family. Default: "gaussian".
-#' @param bb logical. If TRUE, posterior predictive sampling is performed using the posterior median of \eqn{rho} stored in the fitted object; if FALSE, point prediction is provided for MAP estimate of \eqn{rho} stored in the fitted object. Default: TRUE.
+#' @param bb logical. If TRUE, posterior predictive sampling is performed using the posterior median of \eqn{rho} stored in the fitted object; if FALSE, point prediction from the MAP fit: newdata is standardized with the training means/SDs and the training mean of the response is added back. Default: TRUE.
 #' @param warning logical. If TRUE, emit non-convergence warnings. Default: TRUE.
 #' @param verbose logical. If TRUE, print iteration counts and runtime. Default: TRUE.
 #' @param ... further arguments passed from \code{predict()}.
@@ -71,7 +71,27 @@ predict.BayesCOOP <- function(object, newdata,
     
   } else {
     message("Prediction using MAP estimator...")
-    
+
+    if (!is.null(object$x_center)) {
+      ## Standardize with the training means/SDs and add back the training
+      ## mean of the response (no held-out information is used).
+      x_new <- do.call(cbind, lapply(seq_along(object$feature_names), function(v) {
+        cols <- object$feature_names[[v]]
+        x <- as.matrix(xList_test[[names(object$feature_names)[v]]])
+        missing_cols <- setdiff(cols, colnames(x))
+        if (length(missing_cols)) {
+          stop("newdata is missing ", length(missing_cols), " training feature(s) in view ",
+               names(object$feature_names)[v], ".")
+        }
+        x <- x[, cols, drop = FALSE]
+        sweep(sweep(x, 2L, object$x_center[[v]], "-"), 2L, object$x_scale[[v]], "/")
+      }))
+      output$y_pred <- as.numeric(x_new %*% object$beta_MAP) + object$y_mean
+      output$y_valid <- y_test
+      return(output)
+    }
+
+    ## Objects fitted by earlier versions of BayesCOOP
     if (!is.null(object$multiview_fit)) {
       output$y_pred <- as.numeric(stats::predict(
         object$multiview_fit, newx = lapply(xList_test, as.matrix),

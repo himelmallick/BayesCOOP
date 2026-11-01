@@ -21,7 +21,7 @@
 
 \item{family}{currently supports only Gaussian family. Default: "gaussian".}
 
-\item{bb}{logical. If TRUE, posterior predictive sampling is performed using the posterior median of \eqn{rho} stored in the fitted object; if FALSE, point prediction is provided for MAP estimate of \eqn{rho} stored in the fitted object. Default: TRUE.}
+\item{bb}{logical. If TRUE, posterior predictive sampling is performed using the posterior median of \eqn{rho} stored in the fitted object; if FALSE, point prediction from the MAP fit: newdata is standardized with the training means/SDs and the training mean of the response is added back. Default: TRUE.}
 
 \item{warning}{logical. If TRUE, emit non-convergence warnings. Default: TRUE.}
 

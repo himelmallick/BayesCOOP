@@ -163,9 +163,8 @@ print(mspe_BayesCOOP_bb_true)
 
 # 5. Fit BayesCOOP (Bayesian bootstrap disabled)
 
-With `bb = FALSE`, the MAP path uses the `multiview` elastic-net fit without bootstrap-based uncertainty. Supply candidate grids for `rho`, `alpha`, and optionally `lambda` through `control`. The example below evaluates each alpha/rho combination on the same five CV folds, selects lambda by minimum CV error, and refits the selected model on all training observations. There is no separate 70/30 holdout split for tuning.
+With `bb = FALSE`, BayesCOOP fits the same spike-and-slab model by MAP estimation, without bootstrap-based uncertainty. Supply candidate values of `rho` through `control`. The example below evaluates each `rho` on the same five CV folds, selects the one with the lowest mean CV error, and refits the model on all training observations. There is no separate 70/30 holdout split and no lambda to tune: the penalty comes from the spike-and-slab scales `ss`.
 
-Omit `lambda` to generate a lambda path automatically for each alpha/rho combination. A single alpha or rho value keeps that parameter fixed. The default selection rule is `s = "lambda.1se"`; this example uses `s = "lambda.min"`. The `ss` and `group` options apply only to Bayesian bootstrap mode.
 ```{r fit_bb_false}
 ## Fitting BayesCOOP with explicit tuning grids
 fit_BayesCOOP_bb_false <- BayesCOOP::BayesCOOP(
@@ -175,10 +174,8 @@ fit_BayesCOOP_bb_false <- BayesCOOP::BayesCOOP(
   verbose = FALSE,
   control = list(
     rho = c(0, 0.5, 1),
-    alpha = c(0.5, 0.75, 1),
-    lambda = c(1, 0.1, 0.01),  # omit for automatically generated lambda paths
+    alpha = 1,
     nfolds = 5,
-    s = "lambda.min",
     seed = 123
   )
 )
@@ -186,7 +183,7 @@ fit_BayesCOOP_bb_false <- BayesCOOP::BayesCOOP(
 ## Selected tuning parameters and MAP coefficients
 fit_BayesCOOP_bb_false$rho_MAP
 fit_BayesCOOP_bb_false$alpha_MAP
-fit_BayesCOOP_bb_false$lambda_MAP
+fit_BayesCOOP_bb_false$cv_MAP$cv.table
 fit_BayesCOOP_bb_false$beta_MAP
 
 ## Prediction
