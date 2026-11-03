@@ -15,8 +15,9 @@
 #' @param group logical. If TRUE, predictors are grouped by modality and given a group
 #' spike-and-slab prior. If FALSE, no grouping is used. Default: TRUE.
 #' @param bb logical. If TRUE, run full Bayesian bootstrap inference; if FALSE, run MAP
-#' estimation of the same spike-and-slab model, with \eqn{\rho} chosen by K-fold
-#' cross-validation over the values in \code{control$rho}. Default: TRUE.
+#' estimation of the same spike-and-slab model, with \eqn{\rho} chosen over the
+#' values in \code{control$rho} by K-fold cross-validation (default) or a single
+#' holdout split (\code{control$method = "holdout"}). Default: TRUE.
 #' @param alpha_dirich Dirichlet concentration for Bayesian bootstrap weights. Default: 1.
 #' @param a_rho,b_rho shape parameters of the Beta(a_rho, b_rho) prior on \eqn{\rho}.
 #' @param bbiters number of Bayesian bootstrap iterations. Default: 1100.
@@ -28,11 +29,18 @@
 #' \code{rho}: one or more candidate values of the agreement parameter. Optional:
 #' \code{alpha} (single value in [0, 1], default 1; 1 gives the spike-and-slab
 #' lasso prior used by the bootstrap, other values the elastic-net version),
+#' \code{method} (\code{"kfold"}, the default, or \code{"holdout"}),
 #' \code{nfolds} (default 10, capped at the sample size), \code{foldid}
-#' (user-supplied folds) and \code{seed} (local seed for the folds). For every
-#' candidate \eqn{\rho} the model is fitted on K - 1 folds and scored on the
+#' (user-supplied folds), \code{train_frac} (holdout only, default 0.7) and
+#' \code{seed} (local seed for the folds or the split). With \code{"kfold"},
+#' every candidate \eqn{\rho} is fitted on K - 1 folds and scored on the
 #' held-out fold; the \eqn{\rho} with the lowest mean CV error (weighted by fold
 #' size) is selected and the model is refitted on all training observations.
+#' With \code{"holdout"} (the original BayesCOOP MAP tuning), the training data
+#' are split once at random into \code{train_frac} for fitting and the rest for
+#' validation; the \eqn{\rho} with the lowest validation MSPE is selected and the
+#' model is refitted on all training observations. As in the original, the
+#' validation set is standardized and centred with its own means/SDs.
 #' There is no \eqn{\lambda} to tune: the penalty comes from the spike/slab scales
 #' \code{ss}. Predictors are standardized, and the response centred, using only
 #' the observations being fitted.
@@ -49,12 +57,14 @@
 #'
 #' If \code{bb = FALSE}, a list with:
 #' \item{beta_MAP}{MAP estimate of the regression coefficients (standardized scale)}
-#' \item{rho_MAP}{agreement parameter selected by K-fold cross-validation}
+#' \item{rho_MAP}{agreement parameter selected by cross-validation or holdout}
 #' \item{alpha_MAP}{elastic-net mixing parameter used}
 #' \item{x_center, x_scale}{training means and SDs of the predictors, per view}
 #' \item{y_mean}{training mean of the response}
-#' \item{cv_MAP}{CV results: \code{cv.table} (mean and SE of the CV error per
-#' \eqn{\rho}), per-fold errors, \code{foldid} and \code{nfolds}}
+#' \item{cv_MAP}{tuning results: \code{method} and \code{cv.table} (error per
+#' \eqn{\rho}; for \code{"kfold"} the mean and SE of the CV error). For
+#' \code{"kfold"} also per-fold errors, \code{foldid} and \code{nfolds}; for
+#' \code{"holdout"} also \code{train_index} and \code{train_frac}}
 #' \item{time}{runtime in minutes}
 #' \item{feature_names}{list of feature names in the training dataset}
 #'
@@ -207,7 +217,7 @@ BayesCOOP <- function(data_train, family = "gaussian",
 
     start.time <- Sys.time()
     cv_control <- control
-    allowed <- c("alpha", "rho", "nfolds", "foldid", "seed")
+    allowed <- c("alpha", "rho", "nfolds", "foldid", "seed", "method", "train_frac")
     unknown <- setdiff(names(cv_control), allowed)
     if (length(unknown)) {
       stop("Unknown MAP control option(s): ", paste(unknown, collapse = ", "),
@@ -221,6 +231,8 @@ BayesCOOP <- function(data_train, family = "gaussian",
       nfolds = if (is.null(cv_control$nfolds)) 10 else cv_control$nfolds,
       foldid = cv_control$foldid,
       seed = cv_control$seed,
+      method = if (is.null(cv_control$method)) "kfold" else cv_control$method,
+      train_frac = if (is.null(cv_control$train_frac)) 0.7 else cv_control$train_frac,
       ss = ss,
       group = !is.null(group),
       family = family,
@@ -238,8 +250,13 @@ BayesCOOP <- function(data_train, family = "gaussian",
     output$x_center <- fit$x.center
     output$x_scale <- fit$x.scale
     output$y_mean <- fit$y.mean
-    output$cv_MAP <- list(cv.table = fit$cv.table, cvm.folds = fit$cvm.folds,
-                          foldid = fit$foldid, nfolds = fit$nfolds)
+    output$cv_MAP <- if (fit$method == "holdout") {
+      list(method = "holdout", cv.table = fit$cv.table,
+           train_index = fit$train_index, train_frac = fit$train_frac)
+    } else {
+      list(method = "kfold", cv.table = fit$cv.table, cvm.folds = fit$cvm.folds,
+           foldid = fit$foldid, nfolds = fit$nfolds)
+    }
     output$time <- time
     output$feature_names <- feature_names
 

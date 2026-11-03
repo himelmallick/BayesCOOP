@@ -11,11 +11,21 @@
 #
 # Predictors are centred and scaled, and the response centred, using only the
 # observations being fitted; held-out folds are transformed with those values.
+#
+# method = "holdout" instead reproduces the original BayesCOOP MAP tuning
+# (the former bmlasso_cv()): one random split of the training data into
+# train_frac for fitting and the rest for validation, rho chosen by the
+# validation MSPE, then a refit on all observations. As in the original, the
+# validation predictors are standardized and the validation response centred
+# with their own means/SDs.
 
 bmlasso_map_cv <- function(x.list, y, rho, alpha = 1, nfolds = 10,
-                           foldid = NULL, seed = NULL, ss = c(0.05, 1),
+                           foldid = NULL, seed = NULL,
+                           method = c("kfold", "holdout"), train_frac = 0.7,
+                           ss = c(0.05, 1),
                            group = TRUE, family = "gaussian", maxit = 100,
                            warning = FALSE, verbose = FALSE) {
+  method <- match.arg(method)
   if (!is.null(seed)) {
     had_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
     if (had_seed) old_seed <- get(".Random.seed", envir = .GlobalEnv)
@@ -58,25 +68,6 @@ bmlasso_map_cv <- function(x.list, y, rho, alpha = 1, nfolds = 10,
   for (v in seq_along(x.list)) colnames(x.list[[v]]) <- view_cols[[v]]
   groups <- if (isTRUE(group)) unname(view_cols) else NULL
 
-  # Folds drawn as in cvar.multiview().
-  if (is.null(foldid)) {
-    if (length(nfolds) != 1L || !is.finite(nfolds) || nfolds < 2 ||
-        nfolds != as.integer(nfolds)) {
-      stop("nfolds must be an integer of at least 2.")
-    }
-    foldid <- sample(rep(seq_len(min(nfolds, N)), length.out = N))
-  } else {
-    if (length(foldid) != N || anyNA(foldid)) {
-      stop("foldid must have one non-missing value per observation.")
-    }
-    foldid <- match(foldid, unique(foldid))
-  }
-  K <- length(unique(foldid))
-  if (K < 2L || any(N - tabulate(foldid, K) < 2L)) {
-    stop("CV requires at least two folds and two training observations in every fold.")
-  }
-  fold_weights <- tabulate(foldid, K)
-
   fit_scaler <- function(x) {
     sig <- apply(x, 2L, stats::sd)
     sig[!is.finite(sig) | sig <= 0] <- 1
@@ -106,6 +97,67 @@ bmlasso_map_cv <- function(x.list, y, rho, alpha = 1, nfolds = 10,
     x_new <- do.call(cbind, Map(apply_scaler, xs, f$scalers))
     as.numeric(x_new %*% f$beta) + f$y_mean
   }
+  final_output <- function(best, cv_table, extra) {
+    final <- fit_one(x.list, y, rho[best])
+    c(list(beta = final$beta, rho.choice = rho[best], alpha = alpha, method = method,
+           x.center = lapply(final$scalers, `[[`, "center"),
+           x.scale = lapply(final$scalers, `[[`, "scale"),
+           y.mean = final$y_mean, cv.table = cv_table), extra)
+  }
+
+  if (method == "holdout") {
+    if (length(train_frac) != 1L || !is.finite(train_frac) ||
+        train_frac <= 0 || train_frac >= 1) {
+      stop("train_frac must be a single value strictly between 0 and 1.")
+    }
+    train_index <- sample(seq_len(N), round(N * train_frac))
+    valid <- setdiff(seq_len(N), train_index)
+    if (length(train_index) < 2L || length(valid) < 2L) {
+      stop("The holdout split needs at least two observations on each side.")
+    }
+    x_valid <- lapply(x.list, function(x) x[valid, , drop = FALSE])
+    x_valid_std <- do.call(cbind, lapply(x_valid, function(x) apply_scaler(x, fit_scaler(x))))
+    y_valid <- y[valid] - mean(y[valid])
+    mspe <- rep(NA_real_, length(rho))
+    failures <- character()
+    for (i in seq_along(rho)) {
+      if (verbose) message(sprintf("Tuning rho = %.3f (%d/%d)", rho[i], i, length(rho)))
+      mspe[i] <- tryCatch({
+        f <- fit_one(lapply(x.list, function(x) x[train_index, , drop = FALSE]),
+                     y[train_index], rho[i])
+        mean((as.numeric(x_valid_std %*% f$beta) - y_valid)^2)
+      }, error = function(e) {
+        failures <<- c(failures, conditionMessage(e))
+        NA_real_
+      })
+    }
+    if (!any(is.finite(mspe))) {
+      stop("All rho values failed on the holdout split: ", paste(unique(failures), collapse = "; "))
+    }
+    cv_table <- data.frame(rho = rho, cvm = mspe, cvsd = NA_real_,
+                           n_failed_folds = as.integer(!is.finite(mspe)))
+    return(final_output(which.min(mspe), cv_table,
+                        list(train_index = train_index, train_frac = train_frac)))
+  }
+
+  # Folds drawn as in cvar.multiview().
+  if (is.null(foldid)) {
+    if (length(nfolds) != 1L || !is.finite(nfolds) || nfolds < 2 ||
+        nfolds != as.integer(nfolds)) {
+      stop("nfolds must be an integer of at least 2.")
+    }
+    foldid <- sample(rep(seq_len(min(nfolds, N)), length.out = N))
+  } else {
+    if (length(foldid) != N || anyNA(foldid)) {
+      stop("foldid must have one non-missing value per observation.")
+    }
+    foldid <- match(foldid, unique(foldid))
+  }
+  K <- length(unique(foldid))
+  if (K < 2L || any(N - tabulate(foldid, K) < 2L)) {
+    stop("CV requires at least two folds and two training observations in every fold.")
+  }
+  fold_weights <- tabulate(foldid, K)
 
   cv <- matrix(NA_real_, length(rho), K)
   failures <- character()
@@ -135,12 +187,6 @@ bmlasso_map_cv <- function(x.list, y, rho, alpha = 1, nfolds = 10,
   if (!any(is.finite(cv_table$cvm))) {
     stop("All rho values failed in cross-validation: ", paste(unique(failures), collapse = "; "))
   }
-  best <- which.min(cv_table$cvm)
-  final <- fit_one(x.list, y, rho[best])
-
-  list(beta = final$beta, rho.choice = rho[best], alpha = alpha,
-       x.center = lapply(final$scalers, `[[`, "center"),
-       x.scale = lapply(final$scalers, `[[`, "scale"),
-       y.mean = final$y_mean, cv.table = cv_table, cvm.folds = cv,
-       foldid = foldid, nfolds = K)
+  final_output(which.min(cv_table$cvm), cv_table,
+               list(cvm.folds = cv, foldid = foldid, nfolds = K))
 }
